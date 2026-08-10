@@ -131,7 +131,7 @@ export default async function AppointmentsPage({
                 <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                   <Link
                     href={`/patients/${r.patientId}`}
-                    className="text-primary font-medium underline-offset-4 hover:underline"
+                    className="text-primary inline-flex min-h-11 items-center font-medium underline-offset-4 hover:underline"
                   >
                     {r.patientName}
                   </Link>
@@ -142,10 +142,11 @@ export default async function AppointmentsPage({
                     {r.doctorName ?? "بلا طبيب"}
                   </span>
                   {r.phone ? (
+                    /* هدف لمس ≥44px — يُتصل بالمريض من هنا لتأكيد الموعد. */
                     <a
                       href={`tel:${r.phone}`}
                       dir="ltr"
-                      className="text-primary text-sm underline-offset-4 hover:underline"
+                      className="text-primary inline-flex min-h-11 items-center text-sm underline-offset-4 hover:underline"
                     >
                       {r.phone}
                     </a>

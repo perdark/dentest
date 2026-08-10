@@ -71,10 +71,11 @@ export default function DebtsPage() {
                     <TableCell className="font-medium">{r.patientName}</TableCell>
                     <TableCell>
                       {r.phone ? (
+                        /* هدف لمس ≥44px — الاتصال هو الغرض الأساسي لهذه الشاشة. */
                         <a
                           href={`tel:${r.phone}`}
                           dir="ltr"
-                          className="text-primary inline-block underline-offset-4 hover:underline"
+                          className="text-primary inline-flex min-h-11 items-center underline-offset-4 hover:underline"
                         >
                           {r.phone}
                         </a>
