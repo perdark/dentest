@@ -42,6 +42,7 @@ export function BookAppointmentDialog({
 
   useEffect(() => {
     if (state.ok) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- useActionState resolves after the submit event.
       setOpen(false);
       formRef.current?.reset();
     }
@@ -224,6 +225,7 @@ function DeleteAppointment({
   );
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- useActionState resolves after the submit event.
     if (state.ok) setOpen(false);
   }, [state.ok]);
 

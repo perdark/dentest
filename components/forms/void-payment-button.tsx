@@ -38,6 +38,7 @@ export function VoidPaymentButton({
   );
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- useActionState resolves after the submit event.
     if (state.ok) setOpen(false);
   }, [state.ok]);
 
