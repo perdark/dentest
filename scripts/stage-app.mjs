@@ -177,7 +177,26 @@ for (const dead of ["@img", "sharp"]) {
   }
 }
 
-// 7. Safety net — assert no clinic data or source media slipped through.
+// 7. Rename node_modules -> vendor.
+//
+//    electron-builder unconditionally excludes any directory called
+//    "node_modules" from the packaged output — via extraResources AND via
+//    files, with or without an explicit filter. The dependencies therefore
+//    never reached the installer and the app could not have started. Shipping
+//    them under a neutral name gets them packaged; the Electron wrapper then
+//    points NODE_PATH at this folder so require() still finds them. [packaging]
+{
+  const from = path.join(out, "node_modules");
+  const to = path.join(out, "vendor");
+  fs.rmSync(to, { recursive: true, force: true });
+  fs.renameSync(from, to);
+  // .next/node_modules only held Next's symlinked alias, now a real package in
+  // vendor/. Left in place it would be dropped by the same exclusion anyway.
+  fs.rmSync(path.join(out, ".next", "node_modules"), { recursive: true, force: true });
+  console.log("→ node_modules → vendor (electron-builder excludes node_modules)");
+}
+
+// 8. Safety net — assert no clinic data or source media slipped through.
 const forbidden = [];
 (function scan(dir, depth = 0) {
   if (depth > 3) return;

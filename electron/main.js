@@ -22,7 +22,7 @@ const fs = require("node:fs");
 const isDev = !app.isPackaged;
 const appRoot = isDev
   ? path.join(__dirname, "..", "build", "app")
-  : path.join(process.resourcesPath, "app");
+  : path.join(process.resourcesPath, "app", "server");
 
 let serverProcess = null;
 let mainWindow = null;
@@ -103,12 +103,19 @@ async function startServer() {
   const dataDir = app.getPath("userData");
   fs.mkdirSync(dataDir, { recursive: true });
 
+  // Dependencies ship as "vendor" rather than "node_modules", because
+  // electron-builder strips any folder with that name from the package. Point
+  // Node's resolver at it so require() behaves normally. [packaging]
+  const vendor = path.join(appRoot, "vendor");
+  const nodePath = [vendor, process.env.NODE_PATH].filter(Boolean).join(path.delimiter);
+
   serverProcess = spawn(process.execPath, [serverJs], {
     cwd: appRoot,
     env: {
       ...process.env,
       ELECTRON_RUN_AS_NODE: "1",
       NODE_ENV: "production",
+      NODE_PATH: nodePath,
       HOSTNAME: "127.0.0.1",
       PORT: String(serverPort),
       DENTEST_DATA_DIR: dataDir,

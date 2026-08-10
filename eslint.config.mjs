@@ -12,7 +12,16 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Packaging output: the staged server and the Electron distributables are
+    // generated and contain vendored third-party JS.
+    "dist/**",
   ]),
+  {
+    // The Electron main process is a CommonJS Node script, not app code —
+    // require() is the correct module system there.
+    files: ["electron/**/*.js", "scripts/**/*.mjs"],
+    rules: { "@typescript-eslint/no-require-imports": "off" },
+  },
 ]);
 
 export default eslintConfig;

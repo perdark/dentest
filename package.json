@@ -73,26 +73,29 @@
     },
     "files": [
       "electron/**/*",
-      "!**/*.map"
-    ],
-    "extraResources": [
+      "!electron/اقرأني.txt",
+      "!**/*.map",
+      "!node_modules/**/*",
       {
         "from": "build/app",
-        "to": "app"
+        "to": "server",
+        "filter": [
+          "**/*"
+        ]
       }
     ],
-    "npmRebuild": true,
+    "npmRebuild": false,
     "win": {
       "target": [
         {
-          "target": "nsis",
+          "target": "zip",
           "arch": [
             "x64"
           ]
         }
       ],
       "icon": "electron/icon.ico",
-      "artifactName": "Dentest-Setup-${version}.${ext}"
+      "artifactName": "Dentest-${version}-win-x64.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -112,6 +115,13 @@
       ],
       "category": "Office",
       "icon": "electron/icon.png"
-    }
+    },
+    "asar": false,
+    "extraFiles": [
+      {
+        "from": "electron/اقرأني.txt",
+        "to": "اقرأني.txt"
+      }
+    ]
   }
 }
