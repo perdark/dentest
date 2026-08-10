@@ -1,11 +1,15 @@
 // Pure DB client (no "server-only" guard) so CLI scripts (seed) can import it.
 // App code should import "@/lib/db" instead, which re-exports this behind the guard.
+import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import * as schema from "./schema";
+import { databasePath } from "../paths";
 
-const dbPath = process.env.DENTEST_DB ?? path.join(process.cwd(), "dentest.db");
+const dbPath = databasePath();
+// The data folder may not exist yet on a fresh install of the packaged app.
+fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
 const globalForDb = globalThis as unknown as {
   __dentestSqlite?: Database.Database;

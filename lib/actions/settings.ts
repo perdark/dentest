@@ -4,6 +4,7 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import fs from "node:fs";
 import path from "node:path";
+import { backupsDir } from "@/lib/paths";
 import { updateSettings, updateDoctor } from "@/lib/mutations";
 import { getSettings } from "@/lib/server-utils";
 import { verifyPin, hashPin } from "@/lib/crypto";
@@ -172,7 +173,7 @@ export type BackupFile = { name: string; size: number; mtime: number };
 export async function backupDb(): Promise<BackupState> {
   await requireAuth();
   try {
-    const dir = path.join(process.cwd(), "backups");
+    const dir = backupsDir();
     fs.mkdirSync(dir, { recursive: true });
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     const file = path.join(dir, `dentest-${stamp}.db`);
@@ -190,7 +191,7 @@ export async function backupDb(): Promise<BackupState> {
 /** Read helper (filesystem, not DB): list saved backup files, newest first. */
 export async function listBackups(): Promise<BackupFile[]> {
   await requireAuth();
-  const dir = path.join(process.cwd(), "backups");
+  const dir = backupsDir();
   if (!fs.existsSync(dir)) return [];
   return fs
     .readdirSync(dir)

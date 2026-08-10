@@ -32,29 +32,33 @@ const TREATMENTS = [
   { key: "cleaning", nameAr: "تنظيف", nameEn: "Cleaning", settlementBucket: "normal", isImplant: false, isOrtho: false, sortOrder: 7, price: 25000 },
 ] as const;
 
-function run() {
+function log(...a: unknown[]): void {
+  if (process.env.DENTEST_QUIET !== "1") console.log(...a);
+}
+
+export function seed(): void {
   // Settings (single row id=1)
   const existing = db.select().from(settings).where(eq(settings.id, 1)).get();
   if (!existing) {
     db.insert(settings)
       .values({ id: 1, pinHash: hashPin(DEFAULT_PIN), sessionSecret: newSecret() })
       .run();
-    console.log(`• settings created (default PIN = ${DEFAULT_PIN} — change it in الإعدادات)`);
+    log(`• settings created (default PIN = ${DEFAULT_PIN} — change it in الإعدادات)`);
   } else {
     if (!existing.sessionSecret)
       db.update(settings).set({ sessionSecret: newSecret() }).where(eq(settings.id, 1)).run();
     if (!existing.pinHash)
       db.update(settings).set({ pinHash: hashPin(DEFAULT_PIN) }).where(eq(settings.id, 1)).run();
-    console.log("• settings present");
+    log("• settings present");
   }
 
   // Doctors (seed only if empty)
   const docCount = db.select().from(doctors).all().length;
   if (docCount === 0) {
     for (const d of DOCTORS) db.insert(doctors).values(d).run();
-    console.log(`• ${DOCTORS.length} doctors seeded`);
+    log(`• ${DOCTORS.length} doctors seeded`);
   } else {
-    console.log(`• doctors present (${docCount})`);
+    log(`• doctors present (${docCount})`);
   }
 
   // Treatment types + placeholder prices
@@ -77,14 +81,15 @@ function run() {
       .onConflictDoNothing()
       .run();
   }
-  console.log(`• ${TREATMENTS.length} treatment types + placeholder prices ensured`);
+  log(`• ${TREATMENTS.length} treatment types + placeholder prices ensured`);
 
   // Counters
   db.insert(counters).values({ name: "implant_card_no", value: 0 }).onConflictDoNothing().run();
   db.insert(counters).values({ name: "account_seq_no", value: 0 }).onConflictDoNothing().run();
-  console.log("• counters ensured");
+  log("• counters ensured");
 
-  console.log("✅ seed complete");
+  log("✅ seed complete");
 }
 
-run();
+// CLI entry: `npm run db:seed`.
+if (process.argv[1] && process.argv[1].includes("seed")) seed();

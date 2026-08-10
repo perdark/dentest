@@ -18,7 +18,12 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:seed": "tsx lib/db/seed.ts",
-    "db:setup": "drizzle-kit migrate && tsx lib/db/seed.ts"
+    "db:setup": "drizzle-kit migrate && tsx lib/db/seed.ts",
+    "stage": "node scripts/stage-app.mjs",
+    "app:build": "npm run build && npm run stage",
+    "app:start": "electron .",
+    "dist:win": "npm run build && DENTEST_TARGET_PLATFORM=win32 DENTEST_TARGET_ARCH=x64 npm run stage && electron-builder --win --x64",
+    "dist:linux": "npm run app:build && electron-builder --linux dir"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
@@ -45,10 +50,68 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "drizzle-kit": "^0.31.10",
+    "electron": "^41.7.1",
+    "electron-builder": "^26.15.3",
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
     "tailwindcss": "^4",
     "tsx": "^4.22.4",
     "typescript": "^5"
+  },
+  "main": "electron/main.js",
+  "description": "نظام سجلات وحسابات عيادة الأسنان — يعمل محلياً بدون إنترنت",
+  "author": {
+    "name": "Dentest"
+  },
+  "build": {
+    "appId": "iq.dentest.clinic",
+    "productName": "Dentest",
+    "copyright": "Dentest",
+    "directories": {
+      "output": "dist",
+      "buildResources": "electron"
+    },
+    "files": [
+      "electron/**/*",
+      "!**/*.map"
+    ],
+    "extraResources": [
+      {
+        "from": "build/app",
+        "to": "app"
+      }
+    ],
+    "npmRebuild": true,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "electron/icon.ico",
+      "artifactName": "Dentest-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "دِنتِست",
+      "installerLanguages": [
+        "en_US"
+      ],
+      "deleteAppDataOnUninstall": false
+    },
+    "linux": {
+      "target": [
+        "dir"
+      ],
+      "category": "Office",
+      "icon": "electron/icon.png"
+    }
   }
 }
