@@ -1,12 +1,13 @@
 "use client";
 
-import { useActionState, useEffect, useRef } from "react";
+import { useActionState, useCallback, useRef } from "react";
 import { Plus } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { NativeSelect } from "@/components/forms/native-select";
 import { SubmitButton } from "@/components/forms/submit-button";
+import { useActionToast } from "@/components/forms/use-action-toast";
 import { EXPENSE_CATEGORIES } from "@/lib/strings";
 import { addExpenseAction, type ExpenseFormState } from "@/lib/actions/expenses";
 
@@ -17,9 +18,11 @@ export function ExpenseForm({ today }: { today: string }) {
     {},
   );
 
-  useEffect(() => {
-    if (state.ok) formRef.current?.reset();
-  }, [state]);
+  useActionToast(
+    state,
+    "تم حفظ المصروف بنجاح",
+    useCallback(() => formRef.current?.reset(), []),
+  );
 
   return (
     <Card>

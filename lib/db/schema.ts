@@ -20,9 +20,48 @@ export const doctors = sqliteTable("doctors", {
   isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
   // Commission percent (0-100). NULL = UNCONFIRMED with clinic.
   commissionPct: integer("commission_pct"),
+  // Every doctor uses his own lab (e.g. علي → «دوبرا»). Free text, editable:
+  // the clinic changes labs without telling anyone. NULL = not recorded yet.
+  labName: text("lab_name"),
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: ts(),
 });
+
+// ── Lab entries (مستحقات المختبر) ───────────────────────────────────────────
+/**
+ * What a doctor owes his own lab — TRACKED ONLY. [قرار العيادة 2026-08-19]
+ *
+ * This money never touches clinic cash and never enters a settlement payout:
+ * the arrangement is between the doctor and his lab, and the clinic only keeps
+ * the running note so nobody has to remember it. That is why nothing here is
+ * joined into `computeSettlement`, and why `cases.labCost` (the optional D6
+ * per-case deduction) stays a completely separate number — confusing the two
+ * would silently start deducting lab money from doctors' shares.
+ *
+ * `amount` is signed: a payment to the lab is entered negative, so the branch
+ * total is what is still outstanding.
+ */
+export const labEntries = sqliteTable(
+  "lab_entries",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    doctorId: integer("doctor_id")
+      .notNull()
+      .references(() => doctors.id),
+    // كل مختبر فرعان: ثابت / متحرك — وكل قيد موسوم بفرعه.
+    branch: text("branch", { enum: ["fixed", "mobile"] }).notNull(),
+    entryDate: text("entry_date").notNull(), // YYYY-MM-DD
+    amount: integer("amount").notNull(),
+    note: text("note"),
+    // اختياري: أحياناً يُربط القيد بمريض بعينه، وأحياناً هو حساب شهري مجمّع.
+    patientId: integer("patient_id").references(() => patients.id),
+    createdAt: ts(),
+  },
+  (t) => [
+    index("lab_entries_doctor_idx").on(t.doctorId),
+    index("lab_entries_date_idx").on(t.entryDate),
+  ],
+);
 
 // ── Patients ───────────────────────────────────────────────────────────────
 export const patients = sqliteTable(
@@ -33,6 +72,14 @@ export const patients = sqliteTable(
     phone: text("phone"),
     address: text("address"),
     notes: text("notes"),
+    // Chronic conditions the doctor must be warned about before he treats:
+    // a JSON array of MEDICAL_FLAGS keys (lib/strings.ts). NULL = nothing
+    // recorded, which is deliberately different from "checked and clear" —
+    // the clinic never has to guess whether a blank means healthy or unasked.
+    medicalFlags: text("medical_flags"),
+    // Free text beside the flags: the medicine, the kind of allergy, anything
+    // the treating doctor should read before he starts.
+    medicalNotes: text("medical_notes"),
     createdAt: ts(),
   },
   (t) => [index("patients_name_idx").on(t.fullName), index("patients_phone_idx").on(t.phone)],
@@ -45,8 +92,11 @@ export const treatmentTypes = sqliteTable("treatment_types", {
   nameAr: text("name_ar").notNull(),
   nameEn: text("name_en").notNull(),
   // Settlement bucket: how this rolls up in the monthly report.
+  // "xray" is deliberately outside the three doctor buckets: X-ray money is
+  // clinic income and is never part of a doctor's commissionable base, so the
+  // settlement's per-doctor sums simply never ask for it. [D9]
   settlementBucket: text("settlement_bucket", {
-    enum: ["implant", "ortho", "normal"],
+    enum: ["implant", "ortho", "normal", "xray"],
   }).notNull(),
   isImplant: integer("is_implant", { mode: "boolean" }).notNull().default(false),
   isOrtho: integer("is_ortho", { mode: "boolean" }).notNull().default(false),
@@ -247,6 +297,11 @@ export const settings = sqliteTable("settings", {
     .default(true), // inactive while labDeductedPerDoctor=false
   defaultCommissionPct: integer("default_commission_pct").notNull().default(50),
   staffSalaryMode: text("staff_salary_mode").notNull().default("manual"),
+  // Set when the demo dataset is loaded, cleared when the records are wiped.
+  // Its only job is to make «this is not real clinic data» impossible to miss:
+  // a clinic that starts real work on top of the demo would have fake money in
+  // its books forever. NULL = the records are the clinic's own.
+  demoDataAt: integer("demo_data_at"),
   updatedAt: integer("updated_at").default(sql`(unixepoch() * 1000)`),
 });
 

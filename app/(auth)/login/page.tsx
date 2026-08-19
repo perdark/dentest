@@ -17,7 +17,7 @@ export default function LoginPage() {
     <div className="flex min-h-dvh items-center justify-center bg-muted/40 p-4">
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
-          <CardTitle className="text-2xl">دِنتِست</CardTitle>
+          <CardTitle className="text-2xl">زُهى</CardTitle>
           <p className="text-muted-foreground text-sm">نظام سجلات وحسابات العيادة</p>
         </CardHeader>
         <CardContent>

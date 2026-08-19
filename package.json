@@ -1,5 +1,5 @@
 {
-  "name": "dentest",
+  "name": "zuha",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -13,17 +13,26 @@
     "test:settlement": "NODE_OPTIONS=--conditions=react-server tsx --test tests/settlement-payout.test.ts",
     "test:payments": "NODE_OPTIONS=--conditions=react-server tsx --test tests/payment-collection.test.ts",
     "test:audit": "NODE_OPTIONS=--conditions=react-server tsx --test tests/audited-mutations.test.ts",
-    "test": "npm run test:settlement && npm run test:payments && npm run test:audit",
-    "verify": "rm -f verify.db verify.db-shm verify.db-wal && DENTEST_DB=./verify.db drizzle-kit migrate && DENTEST_DB=./verify.db tsx lib/db/seed.ts && DENTEST_DB=./verify.db NODE_OPTIONS=--conditions=react-server tsx scripts/verify.ts",
+    "test:xrays": "NODE_OPTIONS=--conditions=react-server tsx --test tests/xray-income.test.ts",
+    "test:ortho": "NODE_OPTIONS=--conditions=react-server tsx --test tests/ortho-open-total.test.ts",
+    "test": "npm run test:settlement && npm run test:payments && npm run test:audit && npm run test:xrays && npm run test:ortho && npm run test:lab",
+    "verify": "rm -f verify.db verify.db-shm verify.db-wal && ZUHA_DB=./verify.db drizzle-kit migrate && ZUHA_DB=./verify.db tsx lib/db/seed.ts && ZUHA_DB=./verify.db NODE_OPTIONS=--conditions=react-server tsx scripts/verify.ts",
+    "e2e": "playwright test",
+    "e2e:ui": "playwright test --ui",
+    "e2e:report": "playwright show-report",
+    "e2e:server": "rm -f e2e.db e2e.db-shm e2e.db-wal && ZUHA_DB=./e2e.db drizzle-kit migrate && ZUHA_DB=./e2e.db tsx lib/db/seed.ts && ZUHA_DB=./e2e.db ZUHA_BACKUPS_DIR=./e2e-backups next dev -p 3100",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:seed": "tsx lib/db/seed.ts",
     "db:setup": "drizzle-kit migrate && tsx lib/db/seed.ts",
+    "db:demo": "NODE_OPTIONS=--conditions=react-server tsx scripts/demo.ts",
+    "db:demo:clear": "NODE_OPTIONS=--conditions=react-server tsx scripts/demo.ts --clear",
     "stage": "node scripts/stage-app.mjs",
     "app:build": "npm run build && npm run stage",
     "app:start": "electron .",
-    "dist:win": "npm run build && DENTEST_TARGET_PLATFORM=win32 DENTEST_TARGET_ARCH=x64 npm run stage && electron-builder --win --x64",
-    "dist:linux": "npm run app:build && electron-builder --linux dir"
+    "dist:win": "npm run build && ZUHA_TARGET_PLATFORM=win32 ZUHA_TARGET_ARCH=x64 npm run stage && electron-builder --win --x64",
+    "dist:linux": "npm run app:build && electron-builder --linux dir",
+    "test:lab": "NODE_OPTIONS=--conditions=react-server tsx --test tests/lab-dues.test.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
@@ -44,6 +53,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/postcss": "^4",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20",
@@ -61,12 +71,12 @@
   "main": "electron/main.js",
   "description": "نظام سجلات وحسابات عيادة الأسنان — يعمل محلياً بدون إنترنت",
   "author": {
-    "name": "Dentest"
+    "name": "Zuha"
   },
   "build": {
-    "appId": "iq.dentest.clinic",
-    "productName": "Dentest",
-    "copyright": "Dentest",
+    "appId": "iq.zuha.clinic",
+    "productName": "Zuha",
+    "copyright": "Zuha",
     "directories": {
       "output": "dist",
       "buildResources": "electron"
@@ -95,7 +105,7 @@
         }
       ],
       "icon": "electron/icon.ico",
-      "artifactName": "Dentest-${version}-win-x64.${ext}"
+      "artifactName": "Zuha-${version}-win-x64.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -103,7 +113,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "دِنتِست",
+      "shortcutName": "زُهى",
       "installerLanguages": [
         "en_US"
       ],

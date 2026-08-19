@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useCallback, useState } from "react";
 import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,6 +12,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { useActionToast } from "@/components/forms/use-action-toast";
 import { formatIQD } from "@/lib/format";
 import { formatDateAr } from "@/lib/dates";
 import { voidPayment, type VoidState } from "@/lib/actions/payments";
@@ -37,10 +38,11 @@ export function VoidPaymentButton({
     {},
   );
 
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- useActionState resolves after the submit event.
-    if (state.ok) setOpen(false);
-  }, [state.ok]);
+  useActionToast(
+    state,
+    "تم إلغاء القيد",
+    useCallback(() => setOpen(false), []),
+  );
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>

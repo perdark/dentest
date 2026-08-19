@@ -19,11 +19,11 @@ interface LoginGate {
   lockedUntil: number;
 }
 
-const globalForGate = globalThis as unknown as { __dentestLoginGate?: LoginGate };
+const globalForGate = globalThis as unknown as { __zuhaLoginGate?: LoginGate };
 
 const gate: LoginGate =
-  globalForGate.__dentestLoginGate ?? { failures: 0, lockedUntil: 0 };
-globalForGate.__dentestLoginGate = gate;
+  globalForGate.__zuhaLoginGate ?? { failures: 0, lockedUntil: 0 };
+globalForGate.__zuhaLoginGate = gate;
 
 /** Seconds remaining on the current lockout, or 0 when login is allowed. */
 export function lockoutRemainingSeconds(now = Date.now()): number {

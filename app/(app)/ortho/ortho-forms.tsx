@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useCallback, useState } from "react";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,7 +17,10 @@ import {
 } from "@/components/ui/dialog";
 import { NativeSelect } from "@/components/forms/native-select";
 import { SubmitButton } from "@/components/forms/submit-button";
+import { useActionToast } from "@/components/forms/use-action-toast";
+import { MoneySummary } from "@/components/forms/money-summary";
 import { createOrthoCase, type OrthoFormState } from "@/lib/actions/ortho";
+import { parseAmount } from "@/lib/format";
 
 type DoctorOption = { id: number; name: string };
 
@@ -31,9 +34,20 @@ export function NewOrthoCaseDialog({
   today: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [downPayment, setDownPayment] = useState("");
   const [state, formAction] = useActionState<OrthoFormState, FormData>(
     createOrthoCase,
     {},
+  );
+  const downAmount = parseAmount(downPayment);
+
+  useActionToast(
+    state,
+    "تم فتح حالة التقويم بنجاح",
+    useCallback(() => {
+      setOpen(false);
+      setDownPayment("");
+    }, []),
   );
 
   return (
@@ -50,7 +64,7 @@ export function NewOrthoCaseDialog({
         <DialogHeader>
           <DialogTitle>حالة تقويم جديدة</DialogTitle>
           <DialogDescription>
-            سجّل المريض والمبلغ المتفق عليه والمقدمة والموعد القادم.
+            أضف المريض والمقدمة والموعد القادم — كل جلسة تُسعَّر عند إضافتها.
           </DialogDescription>
         </DialogHeader>
 
@@ -96,38 +110,20 @@ export function NewOrthoCaseDialog({
               </NativeSelect>
             </div>
 
-            <div className="space-y-1.5">
-              <Label htmlFor="total">الإجمالي المتفق عليه</Label>
-              <Input
-                id="total"
-                name="total"
-                inputMode="numeric"
-                required
-                className="h-11"
-                placeholder="مثال: 1,500,000"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="discount">الخصم</Label>
-              <Input
-                id="discount"
-                name="discount"
-                inputMode="numeric"
-                className="h-11"
-                placeholder="0"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="downPayment">المقدمة</Label>
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="downPayment">المقدمة (اختياري)</Label>
               <Input
                 id="downPayment"
                 name="downPayment"
                 inputMode="numeric"
                 className="h-11"
                 placeholder="0"
+                value={downPayment}
+                onChange={(e) => setDownPayment(e.target.value)}
               />
+              {downAmount > 0 ? (
+                <MoneySummary figures={[{ label: "المقدمة", amount: downAmount }]} />
+              ) : null}
             </div>
 
             <div className="space-y-1.5">

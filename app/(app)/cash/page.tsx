@@ -1,10 +1,10 @@
 import Link from "next/link";
 import type { Metadata } from "next";
-import { ChevronLeft, ChevronRight, AlertTriangle } from "lucide-react";
+import { ChevronLeft, ChevronRight, AlertTriangle, Wallet } from "lucide-react";
 import { cashMovementsForMonth } from "@/lib/queries";
 import { cashOnHand, getSettings } from "@/lib/server-utils";
 import { formatIQD } from "@/lib/format";
-import { formatDateAr, formatPeriodAr, todayISO, currentPeriod } from "@/lib/dates";
+import { formatDateAr, formatPeriodAr, todayISO, currentPeriod, shiftPeriod } from "@/lib/dates";
 import { CASH_MOVE_LABELS } from "@/lib/strings";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -22,12 +22,6 @@ import { CashForm } from "./cash-form";
 
 export const metadata: Metadata = { title: "الحركات النقدية" };
 
-/** "YYYY-MM" + عدد الأشهر -> "YYYY-MM". */
-function shiftPeriod(period: string, delta: number): string {
-  const [y, m] = period.split("-").map(Number);
-  const d = new Date(y, m - 1 + delta, 1);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-}
 
 function Figure({
   label,
@@ -77,41 +71,43 @@ export default async function CashPage({
     <div className="space-y-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">الحركات النقدية</h1>
+          <h1 className="flex items-center gap-2 text-2xl font-bold"><Wallet className="text-muted-foreground size-6 shrink-0" />الحركات النقدية</h1>
           <p className="text-muted-foreground text-sm">
             كل حركة نقد غير مرتبطة بدفعة مريض — احتياطي، سحب، سحب المالك، وصرف
             حصص الأطباء.
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="h-11" render={<Link href={`?period=${prev}`} />}>
+          <Button variant="outline" size="sm" className="h-11" nativeButton={false} render={<Link href={`?period=${prev}`} />}>
             <ChevronRight className="size-4" />
             الشهر السابق
           </Button>
           <span className="min-w-28 text-center text-sm font-semibold">
             {formatPeriodAr(period)}
           </span>
-          <Button variant="outline" size="sm" className="h-11" render={<Link href={`?period=${next}`} />}>
+          <Button variant="outline" size="sm" className="h-11" nativeButton={false} render={<Link href={`?period=${next}`} />}>
             الشهر التالي
             <ChevronLeft className="size-4" />
           </Button>
         </div>
       </header>
 
-      {/* قاعدة الاحتياطي — الرقم غير مؤكد ويُراجع مع العيادة. */}
+      {/* تنبيه تشغيلي: النقد في الصندوق تجاوز الحد المضبوط في «الإعدادات». */}
       {overReserve ? (
         <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-50 px-3 py-3 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
           <AlertTriangle className="mt-0.5 size-5 shrink-0 text-amber-600" />
           <p className="leading-relaxed">
             النقد المتوفر <span className="money">{formatIQD(cash)}</span> تجاوز حد
-            الاحتياطي <span className="money">{formatIQD(settings.cashReserveThreshold)}</span>{" "}
-            (رقم غير مؤكد — يُراجع مع العيادة). سجّلي حركة «احتياطي» خارجة عند
-            تنحية المبلغ من الصندوق.
+            الاحتياطي <span className="money">{formatIQD(settings.cashReserveThreshold)}</span>.
+            سجّلي حركة «احتياطي» خارجة عند تنحية المبلغ من الصندوق.
           </p>
         </div>
       ) : null}
 
-      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <section
+        data-tour="cash-figures"
+        className="animate-stagger grid grid-cols-2 gap-3 lg:grid-cols-4"
+      >
         <Figure label="النقد المتوفر الآن" value={formatIQD(cash)} />
         <Figure label="داخل هذا الشهر" value={formatIQD(inflow)} />
         <Figure label="خارج هذا الشهر" value={formatIQD(outflow)} tone="negative" />
@@ -122,7 +118,9 @@ export default async function CashPage({
         />
       </section>
 
-      <CashForm today={todayISO()} />
+      <div data-tour="cash-form">
+        <CashForm today={todayISO()} cashOnHand={cash} />
+      </div>
 
       <Card>
         <CardHeader>
@@ -155,7 +153,7 @@ export default async function CashPage({
                       </Badge>
                     </TableCell>
                     <TableCell className="text-muted-foreground">
-                      {r.note || "—"}
+                      {r.note}
                     </TableCell>
                     <TableCell
                       className={cn(

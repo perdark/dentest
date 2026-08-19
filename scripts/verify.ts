@@ -1,17 +1,25 @@
 /**
- * End-to-end verification of the money logic (D1–D8) against the real data
+ * End-to-end verification of the money logic (D1–D9) against the real data
  * layer. Run with a throwaway DB:
- *   DENTEST_DB=verify.db NODE_OPTIONS=--conditions=react-server tsx scripts/verify.ts
+ *   ZUHA_DB=verify.db NODE_OPTIONS=--conditions=react-server tsx scripts/verify.ts
  */
 import { eq, and, desc } from "drizzle-orm";
 import { db } from "@/lib/db/client";
 import { auditLog, monthlySettlements } from "@/lib/db/schema";
-import { listDoctors, listTreatmentTypes, caseWithDetails } from "@/lib/queries";
+import {
+  listDoctors,
+  listTreatmentTypes,
+  caseWithDetails,
+  debtsList,
+  openCasesBrief,
+  dashboardStats,
+} from "@/lib/queries";
 import {
   createCaseWithPayment,
   recordCasePayment,
   addExpense,
   createPatient,
+  recordXray,
 } from "@/lib/mutations";
 import { computeSettlement, closeSettlement } from "@/lib/settlement";
 import { cashOnHand } from "@/lib/server-utils";
@@ -87,19 +95,66 @@ createCaseWithPayment({
   firstPayment: { amount: 50_000, kind: "down_payment" },
 });
 
-// 3) Ortho case (Zahra): total 1,000,000, down 200,000
-createCaseWithPayment({
+// 3) Ortho case (Zahra): open-ended — down 200,000, no agreed total.
+// التقويم بلا إجمالي (2026-08-19): الحالة تُفتح بإجمالي صفر ثم تُسعَّر كل جلسة
+// عند إضافتها، تماماً كما يفعل `createOrthoCase`. مالها يبقى نقداً محصَّلاً في
+// الحصيلة، ولا يصير رصيداً على المريض في أي شاشة.
+const orthoCase = createCaseWithPayment({
   patientId: needPatient("مريض التقويم", "07700000003"),
   doctorId: zahra.id,
   treatmentTypeId: ortho.id,
   openedDate: today,
-  listPrice: 1_000_000,
+  listPrice: 0,
   discount: 0,
-  totalPrice: 1_000_000,
+  totalPrice: 0,
   firstPayment: { amount: 200_000, kind: "down_payment" },
 });
+check(
+  "ortho: opened with no agreed total, down payment accepted [2026-08-19]",
+  caseWithDetails(orthoCase.caseId)!.paid === 200_000,
+  `paid=${caseWithDetails(orthoCase.caseId)!.paid}`,
+);
+// جلسة بمبلغها الخاص: لا سقف «متبقٍ» يرفضها.
+needPayment({
+  caseId: orthoCase.caseId,
+  amount: 150_000,
+  kind: "session",
+  paidDate: today,
+  expectedCourse: "ortho",
+});
+check(
+  "ortho: a per-session amount is accepted with no remaining balance [2026-08-19]",
+  caseWithDetails(orthoCase.caseId)!.paid === 350_000,
+  `paid=${caseWithDetails(orthoCase.caseId)!.paid}`,
+);
 
-// 4) Expenses: lab 120k + food 30k
+// 4) X-ray on Adi's name (15,000 paid in full). Clinic income: it must move
+// cash and clinic net, and must leave every figure Adi is paid on untouched. [D9]
+const xrayType = types.find((t) => t.settlementBucket === "xray")!;
+const xray = recordXray({
+  patientId: needPatient("مريض الأشعة", "07700000004"),
+  doctorId: adi.id,
+  treatmentTypeId: xrayType.id,
+  date: today,
+  listPrice: 15_000,
+  discount: 0,
+  paidNow: 15_000,
+});
+check("xray: recorded through the X-ray register [D9]", xray.ok === true);
+check(
+  "xray: dental work is refused by the X-ray register [D9]",
+  recordXray({
+    patientId: needPatient("مريض مرفوض", "07700000005"),
+    doctorId: adi.id,
+    treatmentTypeId: extraction.id,
+    date: today,
+    listPrice: 50_000,
+    discount: 0,
+    paidNow: 50_000,
+  }).ok === false,
+);
+
+// 5) Expenses: lab 120k + food 30k
 addExpense({ expenseDate: today, category: "dental_lab", amount: 120_000 });
 addExpense({ expenseDate: today, category: "food", amount: 30_000 });
 
@@ -116,13 +171,43 @@ check("Adi falls back to the default 50%", adiS.commissionPct === 50, `got ${adi
 check("Adi payout = 375k (×50%, lab NOT deducted) [D6]", adiS.payout === 375_000, `got ${adiS.payout}`);
 check("no shortfall while lab is a clinic expense [A6]", adiS.shortfall === 0, `got ${adiS.shortfall}`);
 check("collectedTotal matches net cash from Adi's cases [A7]", adiS.collectedTotal === 750_000);
-check("Zahra collected ortho = 200k", zahraS.collectedOrtho === 200_000, `got ${zahraS.collectedOrtho}`);
-check("Zahra payout = 100k (×50%) [D3]", zahraS.payout === 100_000, `got ${zahraS.payout}`);
-check("clinic net = collected − payouts − expenses [D7]", st.clinicNet === st.totalCollected - st.totalPayout - st.monthExpenses, `net=${st.clinicNet}`);
+check("Zahra collected ortho = 350k (down + session)", zahraS.collectedOrtho === 350_000, `got ${zahraS.collectedOrtho}`);
+check("Zahra payout = 175k (×50%) [D3]", zahraS.payout === 175_000, `got ${zahraS.payout}`);
+check("clinic net = collected + أشعة − payouts − expenses [D7][D9]", st.clinicNet === st.totalCollected + st.xrayIncome - st.totalPayout - st.monthExpenses, `net=${st.clinicNet}`);
+
+console.log("\n— X-ray income is the clinic's (D9) —");
+// Adi took a 15k X-ray this month. None of it may appear in what he is paid on:
+// collectedTotal stays 750k and accrued stays 2.05M (not 2.065M).
+check("xray money is NOT in Adi's collected total", adiS.collectedTotal === 750_000, `got ${adiS.collectedTotal}`);
+check("xray work is NOT in Adi's work-done total", adiS.accruedTotal === 2_050_000, `got ${adiS.accruedTotal}`);
+check("xray money is NOT in Adi's payout", adiS.payout === 375_000, `got ${adiS.payout}`);
+check("xray income reported separately = 15k", st.xrayIncome === 15_000, `got ${st.xrayIncome}`);
+check(
+  "no doctor bucket carries the xray",
+  st.doctors.every((d) => d.collectedImplant + d.collectedOrtho + d.collectedNormal === d.collectedTotal),
+);
+
+console.log("\n— Ortho is never a patient debt (2026-08-19) —");
+// المال المحصَّل من التقويم يدخل الحصيلة والنقد كاملاً (فوق)، لكن لا رصيد
+// مطلوباً منه: لا يوجد إجمالي متفق عليه ليُطرح منه المدفوع.
+check(
+  "ortho case is not in the debts call-list",
+  !debtsList().some((r) => r.id === orthoCase.caseId),
+);
+check(
+  "ortho case is not in the daily payment picker",
+  !openCasesBrief().some((c) => c.id === orthoCase.caseId),
+);
+// المتبقي المعروض في لوحة التحكم = زراعة عدي وحدها (2M − 700k = 1.3M).
+check(
+  "dashboard outstanding counts the implant only, not ortho",
+  dashboardStats().outstanding === 1_300_000,
+  `got ${dashboardStats().outstanding}`,
+);
 
 console.log("\n— Cash on hand (D8) —");
-// opening 0 + payments(500k+300k-100k+50k+200k=950k) − expenses(150k) = 800k
-check("cashOnHand = 800k", cashOnHand() === 800_000, `got ${cashOnHand()}`);
+// opening 0 + payments(500k+300k-100k+50k+200k+150k+15k=1,115k) − expenses(150k) = 965k
+check("cashOnHand = 965k (xray cash included) [D8][D9]", cashOnHand() === 965_000, `got ${cashOnHand()}`);
 
 console.log("\n— Close month + closed-period edit (D3/D4) —");
 closeSettlement(period);

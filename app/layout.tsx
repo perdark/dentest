@@ -9,7 +9,7 @@ import { Providers } from "@/components/providers";
 // hide and the preload only produced an "unused preload" console warning. [E3]
 
 export const metadata: Metadata = {
-  title: "دِنتِست — نظام العيادة",
+  title: "زُهى — نظام العيادة",
   description: "نظام سجلات وحسابات عيادة الأسنان",
 };
 

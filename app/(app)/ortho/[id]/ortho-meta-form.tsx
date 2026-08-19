@@ -28,7 +28,7 @@ export function OrthoMetaForm({
   useEffect(() => {
     if (state === seen.current) return;
     seen.current = state;
-    if (state.ok) toast.success("تم حفظ الموعد والملاحظة");
+    if (state.ok) toast.success("تم حفظ الموعد والملاحظة بنجاح");
   }, [state]);
 
   return (
@@ -52,21 +52,19 @@ export function OrthoMetaForm({
           type="checkbox"
           name="hasComplaint"
           defaultChecked={hasComplaint}
-          className="size-5 accent-red-600"
+          className="accent-primary size-5"
         />
-        <span className="text-sm font-medium">
-          يوجد شكوى / ملاحظة على هذه الحالة
-        </span>
+        <span className="text-sm font-medium">ملاحظة مهمة على هذه الحالة</span>
       </label>
 
       <div className="space-y-1.5">
-        <Label htmlFor="complaintNote">ملاحظة الشكوى</Label>
+        <Label htmlFor="complaintNote">نص الملاحظة</Label>
         <Textarea
           id="complaintNote"
           name="complaintNote"
           defaultValue={complaintNote ?? ""}
           rows={3}
-          placeholder="سجّل تفاصيل الشكوى أو الملاحظة لحماية العيادة عند أي خلاف."
+          placeholder="سجّل تفاصيل الملاحظة ليكون سجل الحالة كاملاً وموثّقاً."
         />
       </div>
 

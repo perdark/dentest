@@ -7,6 +7,34 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { XIcon } from "lucide-react"
 
+/**
+ * NOTE ON THE MISSING EXIT ANIMATION
+ *
+ * The backdrop and popup below animate on open but not on close, and that is
+ * deliberate. Base UI keeps a closing popup mounted until its exit animation
+ * reports `animationend`. When a dialog closes as the result of a server action,
+ * the concurrent `revalidatePath` re-render interrupts that animation and the
+ * end event never arrives — leaving the popup on screen, fully interactive,
+ * while React's own state already says it is closed.
+ *
+ * In this app that meant: save an appointment, watch the form clear, and see
+ * the dialog sit there as though nothing had happened. Pressing «حفظ» again
+ * booked the patient twice. Every save dialog in the app shares the pattern, so
+ * every one of them could double-write.
+ *
+ * Two things made it wait, and both are removed below:
+ *   - the exit animation itself (`data-closed:animate-out …`), whose
+ *     `animationend` the revalidation interrupts;
+ *   - `duration-100`, which sets `transition-duration` on `transition-property:
+ *     all`. Base UI reads that as "an exit transition is coming" and waits for a
+ *     `transitionend` that never fires, because nothing about the closing popup
+ *     actually transitions.
+ *
+ * With neither, there is nothing to wait for and the popup unmounts on every
+ * close path — save, إلغاء, the X, Escape, the backdrop. A 100ms fade is not
+ * worth a money system that can silently record a payment twice. The opening
+ * animation is untouched.
+ */
 function Dialog({ ...props }: DialogPrimitive.Root.Props) {
   return <DialogPrimitive.Root data-slot="dialog" {...props} />
 }
@@ -31,7 +59,7 @@ function DialogOverlay({
     <DialogPrimitive.Backdrop
       data-slot="dialog-overlay"
       className={cn(
-        "fixed inset-0 isolate z-50 bg-black/10 duration-100 supports-backdrop-filter:backdrop-blur-xs data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
+        "fixed inset-0 isolate z-50 bg-black/10 supports-backdrop-filter:backdrop-blur-xs data-open:animate-in data-open:fade-in-0",
         className
       )}
       {...props}
@@ -53,7 +81,7 @@ function DialogContent({
       <DialogPrimitive.Popup
         data-slot="dialog-content"
         className={cn(
-          "fixed top-1/2 start-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 rtl:translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10 duration-100 outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+          "fixed top-1/2 start-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 rtl:translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10 outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95",
           className
         )}
         {...props}

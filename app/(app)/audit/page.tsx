@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, History } from "lucide-react";
 import { auditTrail, auditEntities, closedPeriodEditCount } from "@/lib/queries";
 import { formatPeriodAr } from "@/lib/dates";
 import { AUDIT_ACTION_LABELS, AUDIT_ENTITY_LABELS } from "@/lib/strings";
@@ -21,7 +21,7 @@ export const metadata: Metadata = { title: "سجل التعديلات" };
 
 /** epoch ms -> "YYYY-MM-DD HH:mm" في التوقيت المحلي. */
 function formatStamp(at: number | null): string {
-  if (!at) return "—";
+  if (!at) return "";
   const d = new Date(at);
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
@@ -49,7 +49,7 @@ export default async function AuditPage({
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="text-2xl font-bold">سجل التعديلات</h1>
+        <h1 className="flex items-center gap-2 text-2xl font-bold"><History className="text-muted-foreground size-6 shrink-0" />سجل التعديلات</h1>
         <p className="text-muted-foreground mt-1 text-sm">
           كل إضافة وتعديل وحذف في النظام، بالترتيب من الأحدث. هذا هو البديل عن
           دفتري الحسابات الكبير والصغير — مصدر واحد للحقيقة مع أثر كامل لكل تغيير.
@@ -68,7 +68,7 @@ export default async function AuditPage({
       ) : null}
 
       {/* فلاتر — نموذج GET بسيط بلا حالة على العميل. */}
-      <form method="get" className="flex flex-wrap items-end gap-2">
+      <form method="get" data-tour="audit-filters" className="flex flex-wrap items-end gap-2">
         <div className="space-y-1.5">
           <label htmlFor="au-entity" className="text-muted-foreground text-xs">
             الجدول
@@ -146,7 +146,7 @@ export default async function AuditPage({
                           {AUDIT_ACTION_LABELS[r.action] ?? r.action}
                         </Badge>
                       </TableCell>
-                      <TableCell className="tabular-nums">{r.entityId ?? "—"}</TableCell>
+                      <TableCell className="tabular-nums">{r.entityId}</TableCell>
                       <TableCell className="whitespace-nowrap">
                         {r.period ? (
                           <span className="inline-flex items-center gap-1.5">
@@ -155,12 +155,10 @@ export default async function AuditPage({
                               <Badge variant="destructive">شهر مُقفل</Badge>
                             ) : null}
                           </span>
-                        ) : (
-                          "—"
-                        )}
+                        ) : null}
                       </TableCell>
                       <TableCell className="text-muted-foreground pe-(--card-spacing)">
-                        {r.note || "—"}
+                        {r.note}
                       </TableCell>
                     </TableRow>
                   ))}

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Search } from "lucide-react";
+import { Search, StickyNote, Smile } from "lucide-react";
 import { orthoCases, listDoctors } from "@/lib/queries";
 import { formatIQD } from "@/lib/format";
 import { formatDateAr, todayISO } from "@/lib/dates";
@@ -33,16 +33,18 @@ export default async function OrthoPage({
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">التقويم</h1>
+          <h1 className="flex items-center gap-2 text-2xl font-bold"><Smile className="text-muted-foreground size-6 shrink-0" />التقويم</h1>
           <p className="text-muted-foreground mt-1 text-sm">
-            سجل حالات التقويم مع تتبّع المواعيد والشكاوى لحماية العيادة.
+            سجل حالات التقويم مع تتبّع المواعيد والملاحظات المهمة على كل حالة.
           </p>
         </div>
-        <NewOrthoCaseDialog
-          doctors={doctors.map((d) => ({ id: d.id, name: d.name }))}
-          defaultDoctorId={defaultDoctorId}
-          today={todayISO()}
-        />
+        <div data-tour="ortho-add">
+          <NewOrthoCaseDialog
+            doctors={doctors.map((d) => ({ id: d.id, name: d.name }))}
+            defaultDoctorId={defaultDoctorId}
+            today={todayISO()}
+          />
+        </div>
       </div>
 
       <form method="get" className="flex items-center gap-2">
@@ -61,24 +63,29 @@ export default async function OrthoPage({
         </Button>
       </form>
 
-      <div className="rounded-xl ring-1 ring-foreground/10">
+      <div
+        data-tour="ortho-list"
+        className="rounded-xl ring-1 ring-foreground/10"
+      >
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead>المريض</TableHead>
               <TableHead>الطبيب</TableHead>
               <TableHead>التاريخ</TableHead>
-              <TableHead className="text-end">الإجمالي</TableHead>
+              <TableHead className="text-end">المقدمة</TableHead>
               <TableHead className="text-end">المدفوع</TableHead>
-              <TableHead className="text-end">المتبقي</TableHead>
               <TableHead>الموعد القادم</TableHead>
-              <TableHead>شكوى؟</TableHead>
+              <TableHead>ملاحظة</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-muted-foreground py-10 text-center">
+                <TableCell
+                  colSpan={7}
+                  className="text-muted-foreground py-10 text-center"
+                >
                   {q ? "لا توجد نتائج مطابقة." : "لا توجد حالات تقويم بعد."}
                 </TableCell>
               </TableRow>
@@ -95,24 +102,28 @@ export default async function OrthoPage({
                   </TableCell>
                   <TableCell>{r.doctorName}</TableCell>
                   <TableCell>{formatDateAr(r.openedDate)}</TableCell>
-                  <TableCell className="money text-end">{formatIQD(r.totalPrice)}</TableCell>
-                  <TableCell className="money text-end">{formatIQD(r.paid)}</TableCell>
+                  <TableCell className="money text-end">
+                    {formatIQD(r.downPayment)}
+                  </TableCell>
                   <TableCell className="money text-end font-medium">
-                    {formatIQD(r.remaining)}
+                    {formatIQD(r.paid)}
                   </TableCell>
                   <TableCell>
                     {r.nextAppointment ? (
                       formatDateAr(r.nextAppointment)
                     ) : (
-                      <span className="text-muted-foreground">—</span>
+                      <span className="text-muted-foreground/60 text-xs">
+                        غير محدَّد
+                      </span>
                     )}
                   </TableCell>
                   <TableCell>
                     {r.hasComplaint ? (
-                      <Badge variant="destructive">شكوى</Badge>
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
+                      <Badge variant="secondary" className="gap-1">
+                        <StickyNote className="size-3" />
+                        ملاحظة
+                      </Badge>
+                    ) : null}
                   </TableCell>
                 </TableRow>
               ))

@@ -176,7 +176,7 @@ export async function backupDb(): Promise<BackupState> {
     const dir = backupsDir();
     fs.mkdirSync(dir, { recursive: true });
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const file = path.join(dir, `dentest-${stamp}.db`);
+    const file = path.join(dir, `zuha-${stamp}.db`);
     await sqlite.backup(file);
     revalidateSettings();
     return { ok: true, file };
@@ -185,6 +185,84 @@ export async function backupDb(): Promise<BackupState> {
       ok: false,
       error: e instanceof Error ? e.message : "تعذّر إنشاء النسخة الاحتياطية.",
     };
+  }
+}
+
+// ── البيانات التجريبية ───────────────────────────────────────────────────────
+export type DemoState = { ok?: boolean; error?: string; message?: string };
+
+/**
+ * Fill an EMPTY database with the training dataset.
+ *
+ * The emptiness check is the whole safety story: once a clinic has entered even
+ * one real patient, adding fictional money to the same books is unrecoverable
+ * without a wipe. So this refuses rather than merges, and the refusal says why.
+ */
+export async function loadDemoData(): Promise<DemoState> {
+  await requireAuth();
+  const { fillDemoData, isDatabaseEmpty } = await import("@/lib/db/demo");
+  if (!isDatabaseEmpty()) {
+    return {
+      error:
+        "توجد سجلات في النظام بالفعل. التعبئة التجريبية تعمل على نظام فارغ فقط — " +
+        "امسح كل السجلات أولاً إذا كنت تريد بيانات تدريب.",
+    };
+  }
+  try {
+    const r = fillDemoData();
+    revalidateAll();
+    return {
+      ok: true,
+      message: `تم تحميل ${r.patients} مريض، ${r.cases} حالة، ${r.payments} دفعة، ${r.appointments} موعد.`,
+    };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "تعذّر تحميل البيانات التجريبية." };
+  }
+}
+
+/**
+ * Delete every record and start clean. Keeps doctors, prices, settings, PIN.
+ * Requires the word «حذف» typed by hand — this is not undoable from inside the
+ * app, and a mis-click here costs the clinic its history.
+ */
+export async function wipeRecords(
+  _prev: DemoState,
+  formData: FormData,
+): Promise<DemoState> {
+  await requireAuth();
+  if (String(formData.get("confirm") ?? "").trim() !== "حذف") {
+    return { error: "اكتب كلمة «حذف» للتأكيد." };
+  }
+  try {
+    const { wipeAllRecords } = await import("@/lib/mutations");
+    const removed = wipeAllRecords("مسح كل السجلات من صفحة الإعدادات");
+    revalidateAll();
+    return {
+      ok: true,
+      message: `تم حذف ${removed.patients} مريض و${removed.payments} دفعة. الأطباء والأسعار ورمز الدخول لم تتغيّر.`,
+    };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "تعذّر مسح السجلات." };
+  }
+}
+
+/** A fill or a wipe changes every screen, so every screen must be re-rendered. */
+function revalidateAll(): void {
+  for (const p of [
+    "/dashboard",
+    "/appointments",
+    "/daily",
+    "/patients",
+    "/implants",
+    "/ortho",
+    "/debts",
+    "/expenses",
+    "/cash",
+    "/settlement",
+    "/audit",
+    "/settings",
+  ]) {
+    revalidatePath(p);
   }
 }
 

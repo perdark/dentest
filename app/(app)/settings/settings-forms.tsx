@@ -2,7 +2,15 @@
 
 import { useActionState, useEffect, useRef, useTransition } from "react";
 import { toast } from "sonner";
-import { Database, ShieldQuestion } from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import {
+  BookOpen,
+  CircleQuestionMark,
+  Database,
+  ShieldQuestion,
+  Trash2,
+} from "lucide-react";
 import type { Doctor, Settings } from "@/lib/db/schema";
 
 // Only the display fields cross the server/client boundary — secret columns
@@ -23,9 +31,11 @@ import {
   updateDoctorPct,
   changePin,
   backupDb,
+  wipeRecords,
   type PinState,
   type SettingsState,
   type BackupFile,
+  type DemoState,
 } from "@/lib/actions/settings";
 import { formatIQD, formatNumber } from "@/lib/format";
 import { Button } from "@/components/ui/button";
@@ -43,11 +53,12 @@ import {
 } from "@/components/ui/card";
 import { SubmitButton } from "@/components/forms/submit-button";
 
-function UnconfirmedBadge() {
+/** نسبة لم تُدخَل بعد — علامة تشغيلية، لا ملاحظة داخلية. */
+function UnsetBadge() {
   return (
-    <Badge variant="secondary" className="gap-1 font-normal">
+    <Badge variant="outline" className="gap-1 font-normal">
       <ShieldQuestion />
-      غير مؤكد — يُراجع مع العيادة
+      لم تُحدَّد بعد
     </Badge>
   );
 }
@@ -121,7 +132,7 @@ function GeneralSection({ settings }: { settings: SettingsView }) {
               className="money h-11 text-start"
             />
             <p className="text-muted-foreground text-xs">
-              النقد الموجود في الصندوق قبل بدء التسجيل في النظام. يدخل في حساب النقد المتوفر.
+              النقد الموجود في الصندوق قبل بدء العمل في النظام. يدخل في حساب النقد المتوفر.
             </p>
           </div>
           <FormError state={state} />
@@ -146,16 +157,13 @@ function AccountingSection({ settings }: { settings: SettingsView }) {
         <CardHeader>
           <CardTitle>إعدادات الحساب</CardTitle>
           <CardDescription>
-            أرقام مبدئية غير مؤكدة — تُراجَع مع العيادة قبل اعتمادها في الحصيلة الشهرية.
+            النِّسَب وقواعد احتساب حصص الأطباء والحد الأدنى للاحتياطي النقدي.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
           {/* حد الاحتياطي النقدي */}
           <div className="space-y-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <Label htmlFor="cashReserveThreshold">حد الاحتياطي النقدي (د.ع)</Label>
-              <UnconfirmedBadge />
-            </div>
+            <Label htmlFor="cashReserveThreshold">حد الاحتياطي النقدي (د.ع)</Label>
             <Input
               id="cashReserveThreshold"
               name="cashReserveThreshold"
@@ -172,10 +180,7 @@ function AccountingSection({ settings }: { settings: SettingsView }) {
 
           {/* النسبة الافتراضية */}
           <div className="space-y-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <Label htmlFor="defaultCommissionPct">نسبة الطبيب الافتراضية (%)</Label>
-              <UnconfirmedBadge />
-            </div>
+            <Label htmlFor="defaultCommissionPct">نسبة الطبيب الافتراضية (%)</Label>
             <Input
               id="defaultCommissionPct"
               name="defaultCommissionPct"
@@ -196,10 +201,7 @@ function AccountingSection({ settings }: { settings: SettingsView }) {
           {/* خصم المختبر من الطبيب */}
           <div className="flex items-start justify-between gap-4">
             <div className="space-y-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <Label htmlFor="labDeductedPerDoctor">خصم المختبر من الطبيب</Label>
-                <UnconfirmedBadge />
-              </div>
+              <Label htmlFor="labDeductedPerDoctor">خصم المختبر من الطبيب</Label>
               <p className="text-muted-foreground text-xs">
                 عند التفعيل، يُخصم ثمن المختبر من حصة الطبيب.
               </p>
@@ -215,10 +217,7 @@ function AccountingSection({ settings }: { settings: SettingsView }) {
           {/* احتساب النسبة بعد المختبر */}
           <div className="flex items-start justify-between gap-4">
             <div className="space-y-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <Label htmlFor="pctAppliedAfterLab">احتساب النسبة بعد خصم المختبر</Label>
-                <UnconfirmedBadge />
-              </div>
+              <Label htmlFor="pctAppliedAfterLab">احتساب النسبة بعد خصم المختبر</Label>
               <p className="text-muted-foreground text-xs">
                 يُستخدم فقط إذا خُصم المختبر من الطبيب.
               </p>
@@ -233,10 +232,7 @@ function AccountingSection({ settings }: { settings: SettingsView }) {
 
           {/* طريقة الرواتب */}
           <div className="space-y-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <Label htmlFor="staffSalaryMode">طريقة رواتب الموظفين</Label>
-              <UnconfirmedBadge />
-            </div>
+            <Label htmlFor="staffSalaryMode">طريقة رواتب الموظفين</Label>
             <Input
               id="staffSalaryMode"
               name="staffSalaryMode"
@@ -278,7 +274,7 @@ function DoctorRow({ doctor }: { doctor: Doctor }) {
           <span className="font-medium">{doctor.name}</span>
           {doctor.isOwner ? <Badge variant="outline">المالك</Badge> : null}
           {doctor.doesOrtho ? <Badge variant="outline">تقويم</Badge> : null}
-          {doctor.commissionPct == null ? <UnconfirmedBadge /> : null}
+          {doctor.commissionPct == null ? <UnsetBadge /> : null}
         </div>
         <FormError state={state} />
       </div>
@@ -304,7 +300,7 @@ function DoctorRow({ doctor }: { doctor: Doctor }) {
           min={0}
           max={100}
           defaultValue={doctor.commissionPct ?? ""}
-          placeholder="—"
+          placeholder="مثال: 40"
           inputMode="numeric"
           dir="ltr"
           autoComplete="off"
@@ -353,7 +349,7 @@ function PinSection() {
 
   return (
     <form ref={formRef} action={formAction}>
-      <Card>
+      <Card data-tour="settings-pin">
         <CardHeader>
           <CardTitle>رمز الدخول</CardTitle>
           <CardDescription>غيّر رمز الدخول المشترك للعيادة.</CardDescription>
@@ -431,7 +427,7 @@ function BackupSection({ backups }: { backups: BackupFile[] }) {
   }
 
   return (
-    <Card>
+    <Card data-tour="settings-backup">
       <CardHeader>
         <CardTitle>النسخ الاحتياطي</CardTitle>
         <CardDescription>
@@ -473,6 +469,115 @@ function BackupSection({ backups }: { backups: BackupFile[] }) {
   );
 }
 
+// ── الشرح التعريفي ───────────────────────────────────────────────────────────
+function TutorialSection() {
+  const router = useRouter();
+
+  function restart() {
+    // Forget every "already seen" mark so the walkthrough offers itself again
+    // on the dashboard, exactly as it does on a brand-new install.
+    try {
+      const stale = Object.keys(localStorage).filter((k) => k.startsWith("zuha.tour."));
+      for (const key of stale) localStorage.removeItem(key);
+    } catch {
+      // Storage disabled — the «؟» button still starts the tour by hand.
+    }
+    toast.success("سيبدأ الشرح من جديد");
+    router.push("/dashboard");
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>الشرح التعريفي</CardTitle>
+        <CardDescription>
+          جولة قصيرة تشرح كل شاشة. تبدأ وحدها أول مرة، ويمكن إعادتها في أي وقت — أو
+          فتح «الدليل» من القائمة لقراءة الشرح كاملاً وطباعته.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-2 sm:flex-row">
+        <Button type="button" variant="outline" onClick={restart} className="h-11">
+          <CircleQuestionMark className="size-4" />
+          إعادة تشغيل الشرح
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          className="h-11"
+          nativeButton={false}
+          render={<Link href="/help" />}
+        >
+          <BookOpen className="size-4" />
+          فتح الدليل
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── البدء من جديد ────────────────────────────────────────────────────────────
+/**
+ * Training data is no longer offered — or announced — inside the clinic's own
+ * program. Staff who see "تجريبي" on a screen they were told is their records
+ * system lose trust in every number on it, and the person handing the laptop
+ * over is the one who knows whether it holds practice data. Loading it is a
+ * setup step now: `npm run demo`, before the clinic ever opens the app.
+ *
+ * Wiping stays here, where the owner can reach it: it is how a clinic that
+ * trained on sample records starts its real books.
+ */
+function ResetSection() {
+  const [wipeState, wipeAction] = useActionState<DemoState, FormData>(wipeRecords, {});
+  const wipeSeen = useRef<DemoState | null>(null);
+
+  useEffect(() => {
+    if (wipeState === wipeSeen.current) return;
+    wipeSeen.current = wipeState;
+    if (wipeState.ok) toast.success("تم مسح السجلات", { description: wipeState.message });
+  }, [wipeState]);
+
+  return (
+    <Card data-tour="settings-reset">
+      <CardHeader>
+        <CardTitle>البدء من جديد</CardTitle>
+        <CardDescription>
+          مسح كل سجلات العيادة والبدء بصفحة بيضاء. الأطباء وأنواع العلاج
+          والإعدادات ورمز الدخول تبقى كما هي.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form action={wipeAction} className="border-destructive/30 space-y-3 rounded-lg border p-3">
+          <div>
+            <p className="text-sm font-medium">مسح كل السجلات</p>
+            <p className="text-muted-foreground mt-1 text-xs">
+              يحذف المرضى والحالات والدفعات والمواعيد والمصروفات والحركات النقدية
+              وسجل التعديلات. <strong>لا يمكن التراجع.</strong>
+            </p>
+            <p className="text-muted-foreground mt-1 text-xs">
+              خُذ نسخة احتياطية أولاً من القسم أعلاه إذا كان في النظام أي شيء يهمّك.
+            </p>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="wipe-confirm">اكتب كلمة «حذف» للتأكيد</Label>
+            <Input
+              id="wipe-confirm"
+              name="confirm"
+              autoComplete="off"
+              placeholder="حذف"
+              className="h-11 sm:max-w-48"
+            />
+          </div>
+          <FormError state={wipeState} />
+          <SubmitButton variant="destructive" className="h-11 w-full sm:w-auto">
+            <Trash2 className="size-4" />
+            مسح كل السجلات
+          </SubmitButton>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
 export function SettingsForms({
   settings,
   doctors,
@@ -489,6 +594,8 @@ export function SettingsForms({
       <DoctorsSection doctors={doctors} />
       <PinSection />
       <BackupSection backups={backups} />
+      <TutorialSection />
+      <ResetSection />
     </div>
   );
 }

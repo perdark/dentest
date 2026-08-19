@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useRef, useState } from "react";
+import { useActionState, useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { AlertTriangle, CircleCheckBig, Lock, Unlock } from "lucide-react";
 import type { SettlementResult, DoctorSettlement } from "@/lib/settlement";
@@ -44,6 +44,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { SubmitButton } from "@/components/forms/submit-button";
+import { useActionToast } from "@/components/forms/use-action-toast";
 import {
   closeMonth,
   reopenMonth,
@@ -120,7 +121,9 @@ export function SettlementTable({
   const sumAccrued = result.doctors.reduce((a, d) => a + d.accruedTotal, 0);
   const totalCollected = result.totalCollected;
   const liveTotalPayout = result.doctors.reduce((a, d) => a + payoutFor(d), 0);
-  const clinicNet = totalCollected - liveTotalPayout - result.monthExpenses;
+  // دخل الأشعة يدخل الصافي كاملاً: لم تُقتطع منه حصة لأي طبيب. [D9]
+  const clinicNet =
+    totalCollected + result.xrayIncome - liveTotalPayout - result.monthExpenses;
 
   const canClose = !result.anyClosed && !result.anyPaid;
   const canReopen = (result.anyClosed || result.anyStale) && !result.anyPaid;
@@ -245,7 +248,9 @@ export function SettlementTable({
                   <TableCell className="money text-muted-foreground text-end">
                     {formatIQD(sumAccrued)}
                   </TableCell>
-                  <TableCell className="text-center text-muted-foreground">—</TableCell>
+                  {/* عمود النسبة لا يُجمع — النِّسَب مئوية لكل طبيب على حدة. */}
+                  <TableCell />
+
                   <TableCell className="money text-end font-bold">
                     {formatIQD(liveTotalPayout)}
                   </TableCell>
@@ -273,8 +278,8 @@ export function SettlementTable({
                 <DialogHeader>
                   <DialogTitle>تأكيد إقفال {formatPeriodAr(period)}</DialogTitle>
                   <DialogDescription>
-                    يُجمّد الإقفال النِّسَب والحصص والمبالغ المُحصّلة كما هي الآن. الأرقام
-                    غير مؤكدة وتُراجع مع العيادة، ويمكنك إعادة فتح الشهر لاحقاً.
+                    يُجمّد الإقفال النِّسَب والحصص والمبالغ المُحصّلة كما هي الآن،
+                    ويمكنك إعادة فتح الشهر لاحقاً.
                   </DialogDescription>
                 </DialogHeader>
                 <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
@@ -305,13 +310,16 @@ export function SettlementTable({
         <CardHeader>
           <CardTitle>صافي العيادة</CardTitle>
           <CardDescription>
-            إجمالي المحصّل − إجمالي الحصص − مصروفات الشهر
+            إجمالي المحصّل
+            {result.xrayIncome !== 0 ? " + دخل الأشعة" : ""} − إجمالي الحصص −
+            مصروفات الشهر
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-1">
           <p className="money text-muted-foreground text-sm">
-            {formatIQD(totalCollected)} − {formatIQD(liveTotalPayout)} −{" "}
-            {formatIQD(result.monthExpenses)}
+            {formatIQD(totalCollected)}
+            {result.xrayIncome !== 0 ? ` + ${formatIQD(result.xrayIncome)}` : ""} −{" "}
+            {formatIQD(liveTotalPayout)} − {formatIQD(result.monthExpenses)}
           </p>
           <p
             className={cn(
@@ -324,6 +332,12 @@ export function SettlementTable({
           <p className="text-muted-foreground text-xs">
             مصروفات الشهر: <span className="money">{formatIQD(result.monthExpenses)}</span>
           </p>
+          {result.xrayIncome !== 0 ? (
+            <p className="text-muted-foreground text-xs">
+              دخل الأشعة: <span className="money">{formatIQD(result.xrayIncome)}</span> —
+              للعيادة بالكامل، ولا يدخل في حصة أي طبيب.
+            </p>
+          ) : null}
         </CardContent>
       </Card>
 
@@ -350,7 +364,7 @@ export function SettlementTable({
             {result.anyPaid ? (
               <Alert>
                 <CircleCheckBig />
-                <AlertTitle>تم تسجيل صرف حصة</AlertTitle>
+                <AlertTitle>تم صرف حصة</AlertTitle>
                 <AlertDescription>
                   حُفظت الحركة النقدية، لذلك لا يمكن إعادة فتح الشهر أو إعادة إقفاله.
                 </AlertDescription>
@@ -373,7 +387,7 @@ export function SettlementTable({
 
             {payoutDoctors.length > 0 ? (
               <div className="flex flex-col gap-2">
-                <p className="text-sm font-medium">تسجيل صرف الحصص</p>
+                <p className="text-sm font-medium">صرف الحصص</p>
                 <ul className="divide-y rounded-lg border">
                   {payoutDoctors.map((d) => (
                     <li
@@ -426,12 +440,18 @@ function PayoutDialog({
     {},
   );
 
+  useActionToast(
+    state,
+    `تم صرف حصة ${doctorName}`,
+    useCallback(() => setOpen(false), []),
+  );
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger
         render={
           <Button variant="outline" className="h-11 whitespace-nowrap">
-            تسجيل الصرف
+            صرف الحصة
           </Button>
         }
       />
@@ -439,8 +459,8 @@ function PayoutDialog({
         <DialogHeader>
           <DialogTitle>صرف حصة — {doctorName}</DialogTitle>
           <DialogDescription>
-            سيُسجَّل المبلغ المعتمد {formatIQD(payout)} كحركة نقدية صادرة لشهر{" "}
-            {formatPeriodAr(period)}. لا يمكن تسجيل الصرف مرتين.
+            سيُحفظ المبلغ المعتمد {formatIQD(payout)} كحركة نقدية صادرة لشهر{" "}
+            {formatPeriodAr(period)}. لا يمكن الصرف مرتين.
           </DialogDescription>
         </DialogHeader>
 

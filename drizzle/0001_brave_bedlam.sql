@@ -1,0 +1,1 @@
+ALTER TABLE `settings` ADD `demo_data_at` integer;

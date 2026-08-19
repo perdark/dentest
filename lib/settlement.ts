@@ -12,6 +12,7 @@ import {
 } from "@/lib/db/schema";
 import { getSettings, recordEdit } from "@/lib/server-utils";
 import { formatPeriodAr } from "@/lib/dates";
+import { XRAY_BUCKET } from "@/lib/strings";
 import { calculateDoctorPayout, payoutShortfall } from "@/lib/settlement-math";
 
 export interface DoctorSettlement {
@@ -37,6 +38,8 @@ export interface SettlementResult {
   doctors: DoctorSettlement[];
   totalCollected: number;
   totalPayout: number;
+  /** X-ray cash collected in the period — clinic income, no doctor share. [D9] */
+  xrayIncome: number;
   monthExpenses: number;
   clinicNet: number;
   labDeductedPerDoctor: boolean;
@@ -54,6 +57,12 @@ export interface SettlementResult {
  * [D6] lab not deducted per doctor by default. [D3] % = per-month override ??
  * doctor.commissionPct ?? default. [D7] owner (Adi) settled uniformly;
  * clinicNet shown separately.
+ *
+ * [D9] X-ray money never reaches a doctor. Per-doctor sums ask for the three
+ * doctor buckets by name, so the "xray" bucket is excluded by construction; the
+ * work-done and lab figures filter it out explicitly for the same reason. The
+ * money is not lost — it is reported as the clinic's own income line and added
+ * back into clinicNet.
  */
 export function computeSettlement(
   period: string,
@@ -80,11 +89,20 @@ export function computeSettlement(
     .groupBy(payments.doctorId, treatmentTypes.settlementBucket)
     .all();
 
+  // An X-ray is not the doctor's work to be credited with, so it is filtered
+  // out of the work-done and lab figures the same way it is out of the
+  // collected buckets. [D9]
+  const doctorWork = and(
+    periodOpen,
+    sql`${treatmentTypes.settlementBucket} <> ${XRAY_BUCKET}`,
+  );
+
   // Accrued (work-done) per doctor: cases opened in period at agreed price. [D1]
   const accrued = db
     .select({ doctorId: cases.doctorId, total: sql<number>`coalesce(sum(${cases.totalPrice}),0)` })
     .from(cases)
-    .where(periodOpen)
+    .innerJoin(treatmentTypes, eq(cases.treatmentTypeId, treatmentTypes.id))
+    .where(doctorWork)
     .groupBy(cases.doctorId)
     .all();
 
@@ -92,7 +110,8 @@ export function computeSettlement(
   const lab = db
     .select({ doctorId: cases.doctorId, total: sql<number>`coalesce(sum(${cases.labCost}),0)` })
     .from(cases)
-    .where(periodOpen)
+    .innerJoin(treatmentTypes, eq(cases.treatmentTypeId, treatmentTypes.id))
+    .where(doctorWork)
     .groupBy(cases.doctorId)
     .all();
 
@@ -158,13 +177,23 @@ export function computeSettlement(
   const totalCollected = result.reduce((s2, r) => s2 + r.collectedTotal, 0);
   const totalPayout = result.reduce((s2, r) => s2 + r.payout, 0);
 
+  // Clinic income: collected on the "xray" bucket, which no doctor row above
+  // asked for. Read live even for a closed month, exactly like monthExpenses —
+  // a snapshot freezes the doctors' shares, not the clinic's own books. [D9]
+  const xrayIncome = collected
+    .filter((c) => c.bucket === XRAY_BUCKET)
+    .reduce((s2, c) => s2 + c.total, 0);
+
   return {
     period,
     doctors: result,
     totalCollected,
     totalPayout,
+    xrayIncome,
     monthExpenses,
-    clinicNet: totalCollected - totalPayout - monthExpenses, // [D7] salaries=0 (Layer 2)
+    // [D7] salaries=0 (Layer 2). [D9] X-ray income is the clinic's, so it is
+    // added whole — no share was taken out of it upstream.
+    clinicNet: totalCollected + xrayIncome - totalPayout - monthExpenses,
     labDeductedPerDoctor: s.labDeductedPerDoctor,
     pctAppliedAfterLab: s.pctAppliedAfterLab,
     anyClosed: result.some((r) => r.status === "closed"),

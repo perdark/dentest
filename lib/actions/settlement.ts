@@ -77,7 +77,7 @@ export async function reopenMonth(
   return { ok: true };
 }
 
-// ── تسجيل صرف حصة طبيب (حركة نقدية صادرة) [D8] ─────────────────────────────────
+// ── صرف حصة طبيب (حركة نقدية صادرة) [D8] ──────────────────────────────────────
 export type PayoutState = { ok?: boolean; error?: string };
 
 const paySchema = z.object({
@@ -106,8 +106,8 @@ export async function markPaid(
   if (!result.ok) {
     const errors = {
       not_found: "لم يتم العثور على حصيلة الطبيب لهذا الشهر.",
-      not_closed: "يجب إقفال الشهر قبل تسجيل الصرف.",
-      already_paid: "تم تسجيل صرف هذه الحصة مسبقاً.",
+      not_closed: "يجب إقفال الشهر قبل الصرف.",
+      already_paid: "تم صرف هذه الحصة مسبقاً.",
       non_positive: "لا توجد حصة موجبة قابلة للصرف.",
     } satisfies Record<typeof result.reason, string>;
     return { error: errors[result.reason] };

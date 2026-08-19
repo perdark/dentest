@@ -18,13 +18,19 @@ export type ImplantFormState = { ok?: boolean; error?: string };
 
 const optionalText = z.string().optional().default("");
 
+/**
+ * «الجهاز» was dropped from the implant card — the clinic does not record an
+ * implant system per case, so the field only ever collected blanks. The column
+ * stays in the database so the few cards that do carry a value keep it; no
+ * screen writes it any more.
+ */
+
 // ── إنشاء بطاقة زراعة جديدة ───────────────────────────────────────────────────
 const createSchema = z.object({
   fullName: z.string().trim().min(1, "اسم المريض مطلوب"),
   phone: optionalText,
   doctorId: z.coerce.number().int().positive("اختر الطبيب المعالج"),
   address: optionalText,
-  device: optionalText,
   price: optionalText,
   discount: optionalText,
   downPayment: optionalText,
@@ -71,7 +77,6 @@ export async function createImplantCard(
     listPrice: price,
     discount,
     totalPrice: total,
-    device: d.device || null,
     address: d.address || null,
     firstPayment: { amount: downPayment, kind: "down_payment" },
   });
@@ -84,7 +89,6 @@ export async function createImplantCard(
 // ── تعديل بيانات البطاقة ──────────────────────────────────────────────────────
 const updateSchema = z.object({
   caseId: z.coerce.number().int().positive(),
-  device: optionalText,
   address: optionalText,
   labCost: optionalText,
   // السعر الكلي قبل الخصم — الإجمالي مشتقّ منه على الخادم، لا يُرسَل من المتصفّح.
@@ -113,8 +117,9 @@ export async function updateImplantCard(
     return { error: "الخصم أكبر من السعر الكلي" };
   }
 
+  // `device` is deliberately absent: updateCaseMeta patches only the keys it
+  // is given, so an edit no longer blanks a value the screen cannot show.
   const updated = updateCaseMeta(d.caseId, {
-    device: d.device.trim() || null,
     addressSnapshot: d.address.trim() || null,
     labCost: Math.max(0, parseAmount(d.labCost)),
     listPrice: price,

@@ -1,10 +1,14 @@
 /**
- * Idempotent seed: doctors, treatment types, placeholder prices, settings,
- * counters. Run with `npm run db:seed`. Safe to run repeatedly.
+ * Idempotent seed: doctors, treatment types, settings, counters.
+ * Run with `npm run db:seed`. Safe to run repeatedly.
+ *
+ * No prices are seeded: «قائمة الأسعار» was removed 2026-08-19 because the
+ * clinic prices every case individually. The `price_list` table stays in the
+ * schema but nothing writes to it any more.
  */
 import { eq } from "drizzle-orm";
 import { db } from "./client";
-import { counters, doctors, priceList, settings, treatmentTypes } from "./schema";
+import { counters, doctors, settings, treatmentTypes } from "./schema";
 import { hashPin, newSecret } from "../crypto";
 
 const DEFAULT_PIN = "1234";
@@ -22,18 +26,24 @@ const DOCTORS = [
   { name: "د. زهرة", isOwner: false, doesOrtho: true, commissionPct: null, sortOrder: 5 },
 ];
 
+// No `price` column here on purpose: every case is priced when it is opened.
 const TREATMENTS = [
-  { key: "implant", nameAr: "زراعة", nameEn: "Implant", settlementBucket: "implant", isImplant: true, isOrtho: false, sortOrder: 1, price: 1500000 },
-  { key: "ortho", nameAr: "تقويم", nameEn: "Orthodontics", settlementBucket: "ortho", isImplant: false, isOrtho: true, sortOrder: 2, price: 1000000 },
-  { key: "extraction_surgical", nameAr: "قلع جراحي", nameEn: "Surgical extraction", settlementBucket: "normal", isImplant: false, isOrtho: false, sortOrder: 3, price: 50000 },
-  { key: "extraction_normal", nameAr: "قلع عادي", nameEn: "Normal extraction", settlementBucket: "normal", isImplant: false, isOrtho: false, sortOrder: 4, price: 25000 },
-  { key: "filling", nameAr: "حشوة", nameEn: "Filling", settlementBucket: "normal", isImplant: false, isOrtho: false, sortOrder: 5, price: 50000 },
-  { key: "bridge", nameAr: "جسر", nameEn: "Bridge", settlementBucket: "normal", isImplant: false, isOrtho: false, sortOrder: 6, price: 250000 },
-  { key: "cleaning", nameAr: "تنظيف", nameEn: "Cleaning", settlementBucket: "normal", isImplant: false, isOrtho: false, sortOrder: 7, price: 25000 },
+  { key: "implant", nameAr: "زراعة", nameEn: "Implant", settlementBucket: "implant", isImplant: true, isOrtho: false, sortOrder: 1 },
+  { key: "ortho", nameAr: "تقويم", nameEn: "Orthodontics", settlementBucket: "ortho", isImplant: false, isOrtho: true, sortOrder: 2 },
+  { key: "extraction_surgical", nameAr: "قلع جراحي", nameEn: "Surgical extraction", settlementBucket: "normal", isImplant: false, isOrtho: false, sortOrder: 3 },
+  { key: "extraction_normal", nameAr: "قلع عادي", nameEn: "Normal extraction", settlementBucket: "normal", isImplant: false, isOrtho: false, sortOrder: 4 },
+  { key: "filling", nameAr: "حشوة", nameEn: "Filling", settlementBucket: "normal", isImplant: false, isOrtho: false, sortOrder: 5 },
+  { key: "bridge", nameAr: "جسر", nameEn: "Bridge", settlementBucket: "normal", isImplant: false, isOrtho: false, sortOrder: 6 },
+  { key: "cleaning", nameAr: "تنظيف", nameEn: "Cleaning", settlementBucket: "normal", isImplant: false, isOrtho: false, sortOrder: 7 },
+  // الأشعة — bucket "xray": clinic income, never inside a doctor's share. [D9]
+  { key: "xray_panoramic", nameAr: "أشعة بانوراما", nameEn: "Panoramic X-ray (OPG)", settlementBucket: "xray", isImplant: false, isOrtho: false, sortOrder: 8 },
+  { key: "xray_periapical", nameAr: "أشعة ذروية", nameEn: "Periapical X-ray", settlementBucket: "xray", isImplant: false, isOrtho: false, sortOrder: 9 },
+  { key: "xray_cbct", nameAr: "أشعة ثلاثية الأبعاد", nameEn: "CBCT scan", settlementBucket: "xray", isImplant: false, isOrtho: false, sortOrder: 10 },
+  { key: "xray_ceph", nameAr: "أشعة سيفالومترية", nameEn: "Cephalometric X-ray", settlementBucket: "xray", isImplant: false, isOrtho: false, sortOrder: 11 },
 ] as const;
 
 function log(...a: unknown[]): void {
-  if (process.env.DENTEST_QUIET !== "1") console.log(...a);
+  if (process.env.ZUHA_QUIET !== "1") console.log(...a);
 }
 
 export function seed(): void {
@@ -61,7 +71,7 @@ export function seed(): void {
     log(`• doctors present (${docCount})`);
   }
 
-  // Treatment types + placeholder prices
+  // Treatment types
   for (const t of TREATMENTS) {
     db.insert(treatmentTypes)
       .values({
@@ -75,13 +85,8 @@ export function seed(): void {
       })
       .onConflictDoNothing()
       .run();
-    const tt = db.select().from(treatmentTypes).where(eq(treatmentTypes.key, t.key)).get()!;
-    db.insert(priceList)
-      .values({ treatmentTypeId: tt.id, defaultPrice: t.price, isPlaceholder: true })
-      .onConflictDoNothing()
-      .run();
   }
-  log(`• ${TREATMENTS.length} treatment types + placeholder prices ensured`);
+  log(`• ${TREATMENTS.length} treatment types ensured`);
 
   // Counters
   db.insert(counters).values({ name: "implant_card_no", value: 0 }).onConflictDoNothing().run();

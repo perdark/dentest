@@ -75,13 +75,63 @@ function waitForServer(port, timeoutMs = 60000) {
 function fatal(title, detail) {
   dialog.showMessageBoxSync({
     type: "error",
-    title: "دِنتِست",
+    title: "زُهى",
     message: title,
     detail,
     buttons: ["إغلاق"],
     defaultId: 0,
   });
   app.exit(1);
+}
+
+/**
+ * Carry the clinic's records over from the pre-rename install.
+ *
+ * Electron derives the user-data folder from the app name, so renaming
+ * «دِنتِست» to «زُهى» moves it from %APPDATA%\dentest to %APPDATA%\zuha. Left
+ * alone, a clinic that had been entering patients for weeks would open the
+ * updated program and find an empty database — with their real records still on
+ * disk but invisible. Copy them across once, on the first launch of the new
+ * name. Copies are never deletions: the old folder stays as a safety net.
+ */
+function adoptLegacyUserData(dataDir) {
+  const target = path.join(dataDir, "zuha.db");
+  if (fs.existsSync(target)) return;
+
+  const legacyDir = path.join(app.getPath("appData"), "dentest");
+  const legacyDb = path.join(legacyDir, "dentest.db");
+  if (!fs.existsSync(legacyDb)) return;
+
+  try {
+    fs.copyFileSync(legacyDb, target);
+    // WAL mode can hold the newest committed rows in the sidecar. -shm is
+    // rebuilt by SQLite on open, so it is deliberately not copied.
+    if (fs.existsSync(legacyDb + "-wal")) {
+      fs.copyFileSync(legacyDb + "-wal", target + "-wal");
+    }
+
+    const legacyBackups = path.join(legacyDir, "backups");
+    if (fs.existsSync(legacyBackups)) {
+      const dest = path.join(dataDir, "backups");
+      fs.mkdirSync(dest, { recursive: true });
+      for (const entry of fs.readdirSync(legacyBackups, { withFileTypes: true })) {
+        if (!entry.isFile()) continue;
+        const to = path.join(dest, entry.name);
+        if (!fs.existsSync(to)) fs.copyFileSync(path.join(legacyBackups, entry.name), to);
+      }
+    }
+  } catch (err) {
+    // Starting on an empty database while the real one exists is the worst
+    // possible outcome — the staff would enter a day of work into the wrong
+    // file. Say so plainly and stop.
+    fatal(
+      "تعذّر نقل بيانات العيادة من الإصدار السابق",
+      `البيانات القديمة موجودة في:\n${legacyDir}\n\n` +
+        `ولم نتمكن من نسخها إلى:\n${dataDir}\n\n` +
+        `التفاصيل: ${String((err && err.message) || err)}\n\n` +
+        "راجع من قام بتركيب النظام قبل إدخال أي بيانات جديدة.",
+    );
+  }
 }
 
 // ── server lifecycle ────────────────────────────────────────────────────────
@@ -102,6 +152,7 @@ async function startServer() {
   // the program: Program Files is read-only and is replaced on every update.
   const dataDir = app.getPath("userData");
   fs.mkdirSync(dataDir, { recursive: true });
+  adoptLegacyUserData(dataDir);
 
   // Dependencies ship as "vendor" rather than "node_modules", because
   // electron-builder strips any folder with that name from the package. Point
@@ -118,9 +169,9 @@ async function startServer() {
       NODE_PATH: nodePath,
       HOSTNAME: "127.0.0.1",
       PORT: String(serverPort),
-      DENTEST_DATA_DIR: dataDir,
-      DENTEST_MIGRATIONS_DIR: path.join(appRoot, "drizzle"),
-      DENTEST_QUIET: "1",
+      ZUHA_DATA_DIR: dataDir,
+      ZUHA_MIGRATIONS_DIR: path.join(appRoot, "drizzle"),
+      ZUHA_QUIET: "1",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -161,7 +212,7 @@ function createWindow() {
     minHeight: 600,
     show: false,
     backgroundColor: "#ffffff",
-    title: "دِنتِست — نظام العيادة",
+    title: "زُهى — نظام العيادة",
     icon: path.join(__dirname, "icon.png"),
     webPreferences: {
       contextIsolation: true,

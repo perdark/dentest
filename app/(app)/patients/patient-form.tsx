@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useCallback, useState } from "react";
 import { Pencil, Plus } from "lucide-react";
 import {
   Dialog,
@@ -13,11 +13,18 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { SubmitButton } from "@/components/forms/submit-button";
+import { useActionToast } from "@/components/forms/use-action-toast";
 import type { Patient } from "@/lib/db/schema";
+import {
+  MEDICAL_FLAGS,
+  MEDICAL_FLAG_LABELS,
+  parseMedicalFlags,
+} from "@/lib/strings";
 import {
   createPatientAction,
   updatePatientAction,
@@ -37,14 +44,14 @@ export function PatientForm({
     {},
   );
   const [open, setOpen] = useState(false);
+  const checkedFlags = new Set<string>(parseMedicalFlags(patient?.medicalFlags));
 
-  // كل تنفيذ ناجح يُرجع كائن حالة جديد، فيُغلق الحوار مرة واحدة فقط.
-  useEffect(() => {
-    if (state.ok) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- useActionState resolves after the submit event.
-      setOpen(false);
-    }
-  }, [state]);
+  // كل تنفيذ ناجح يُرجع كائن حالة جديد، فيُغلق الحوار ويُظهر التأكيد مرة واحدة.
+  useActionToast(
+    state,
+    isEdit ? "تم حفظ تعديلات المريض" : "تمت إضافة المريض بنجاح",
+    useCallback(() => setOpen(false), []),
+  );
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -121,6 +128,42 @@ export function PatientForm({
               name="notes"
               defaultValue={patient?.notes ?? ""}
               placeholder="ملاحظات إضافية (اختياري)"
+            />
+          </div>
+
+          {/* الحالة الصحية — تُقرأ قبل أي علاج، فتظهر مع اسم المريض في كل شاشة. */}
+          <div className="space-y-2">
+            <Label>الحالة الصحية</Label>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {MEDICAL_FLAGS.map((key) => (
+                <div
+                  key={key}
+                  className="border-input flex h-11 items-center gap-2 rounded-lg border px-3"
+                >
+                  <Checkbox
+                    id={`patient-mf-${key}`}
+                    name="medicalFlags"
+                    value={key}
+                    defaultChecked={checkedFlags.has(key)}
+                  />
+                  <Label
+                    htmlFor={`patient-mf-${key}`}
+                    className="cursor-pointer text-sm font-normal"
+                  >
+                    {MEDICAL_FLAG_LABELS[key]}
+                  </Label>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="patient-medicalNotes">تفاصيل الحالة الصحية (اختياري)</Label>
+            <Textarea
+              id="patient-medicalNotes"
+              name="medicalNotes"
+              defaultValue={patient?.medicalNotes ?? ""}
+              placeholder="أدوية، نوع الحساسية، ملاحظات للطبيب…"
             />
           </div>
 

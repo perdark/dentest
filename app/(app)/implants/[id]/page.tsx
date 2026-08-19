@@ -6,6 +6,8 @@ import { formatIQD } from "@/lib/format";
 import { formatDateAr, todayISO } from "@/lib/dates";
 import { CASE_STATUS_LABELS, PAYMENT_KIND_LABELS } from "@/lib/strings";
 import { Badge } from "@/components/ui/badge";
+import { MedicalBadge } from "@/components/ui/medical-badge";
+import { EmptyValue, isBlank } from "@/components/ui/empty-value";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -29,7 +31,9 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   return (
     <div className="space-y-1 border-b py-2 last:border-0">
       <dt className="text-muted-foreground text-xs">{label}</dt>
-      <dd className="text-sm font-medium">{children}</dd>
+      <dd className="text-sm font-medium">
+        {isBlank(children) ? <EmptyValue /> : children}
+      </dd>
     </div>
   );
 }
@@ -58,27 +62,31 @@ export default async function ImplantCardPage({
             size="icon"
             className="h-11 w-11"
             aria-label="رجوع إلى الفهرس"
+            nativeButton={false}
             render={<Link href="/implants" />}
           >
             <ArrowRight className="size-5" />
           </Button>
           <div>
             <h1 className="text-2xl font-bold">
-              بطاقة زراعة رقم {details.implantCardNo ?? "—"}
+              بطاقة زراعة رقم {details.implantCardNo ?? "…"}
             </h1>
-            <p className="text-muted-foreground mt-1 text-sm">{details.patientName}</p>
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              <p className="text-muted-foreground text-sm">{details.patientName}</p>
+              <MedicalBadge flags={details.patientMedicalFlags} />
+            </div>
           </div>
         </div>
         <CardActions
           card={{
             caseId: raw.id,
-            device: raw.device,
             address: raw.addressSnapshot,
             labCost: raw.labCost,
             listPrice: raw.listPrice,
             discount: raw.discount,
             status: raw.status,
             notes: raw.notes,
+            paid: details.paid,
           }}
           today={todayISO()}
         />
@@ -91,11 +99,8 @@ export default async function ImplantCardPage({
           </CardHeader>
           <CardContent>
             <dl className="grid grid-cols-1 gap-x-6 sm:grid-cols-2">
-              <Field label="رقم الحساب">
-                <span className="tabular-nums">{details.accountSeqNo ?? "—"}</span>
-              </Field>
               <Field label="رقم الكارت">
-                <span className="tabular-nums">{details.implantCardNo ?? "—"}</span>
+                <span className="tabular-nums">{details.implantCardNo}</span>
               </Field>
               <Field label="المريض">
                 <Link
@@ -106,8 +111,7 @@ export default async function ImplantCardPage({
                 </Link>
               </Field>
               <Field label="الطبيب">{details.doctorName}</Field>
-              <Field label="العنوان">{raw.addressSnapshot || "—"}</Field>
-              <Field label="الجهاز">{raw.device || "—"}</Field>
+              <Field label="العنوان">{raw.addressSnapshot}</Field>
               <Field label="التاريخ">{formatDateAr(details.openedDate)}</Field>
               <Field label="عدد الجلسات">
                 {/* الجلسات فقط — الاسترجاع والتسوية ليست زيارات. [D4] */}
@@ -126,7 +130,7 @@ export default async function ImplantCardPage({
                 <span className="money tabular-nums">{formatIQD(raw.labCost)}</span>
               </Field>
               <Field label="ملاحظات">
-                <span className="whitespace-pre-wrap">{raw.notes || "—"}</span>
+                <span className="whitespace-pre-wrap">{raw.notes}</span>
               </Field>
             </dl>
           </CardContent>
@@ -188,7 +192,7 @@ export default async function ImplantCardPage({
                       {formatIQD(p.amount)}
                     </TableCell>
                     <TableCell>{p.doctorName}</TableCell>
-                    <TableCell className="text-muted-foreground">{p.note || "—"}</TableCell>
+                    <TableCell className="text-muted-foreground">{p.note}</TableCell>
                     <TableCell className="text-end">
                       <VoidPaymentButton
                         paymentId={p.id}

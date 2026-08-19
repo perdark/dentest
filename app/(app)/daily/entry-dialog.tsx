@@ -1,11 +1,12 @@
 "use client";
 
-import { useActionState, useEffect, useRef, useState, useTransition } from "react";
+import { useActionState, useCallback, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -16,17 +17,24 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/forms/native-select";
 import { SubmitButton } from "@/components/forms/submit-button";
+import { useActionToast } from "@/components/forms/use-action-toast";
+import { MoneySummary } from "@/components/forms/money-summary";
 import { PAYMENT_KIND_LABELS } from "@/lib/strings";
+import { parseAmount } from "@/lib/format";
 import {
   createVisitNewCase,
   addVisitPayment,
   searchCollectableCases,
+  type CaseOption,
   type VisitFormState,
 } from "@/lib/actions/visits";
 
 type DoctorOpt = { id: number; name: string };
-type TreatmentOpt = { id: number; nameAr: string; defaultPrice: number };
-type CaseBrief = { id: number; label: string };
+type TreatmentOpt = { id: number; nameAr: string };
+type CaseBrief = CaseOption;
+
+const PAYMENT_KINDS = ["session", "down_payment", "adjustment", "refund"] as const;
+type PaymentKind = (typeof PAYMENT_KINDS)[number];
 
 export function EntryDialog({
   doctors,
@@ -44,10 +52,10 @@ export function EntryDialog({
   const [open, setOpen] = useState(false);
   const router = useRouter();
 
-  function handleSuccess() {
+  const handleSuccess = useCallback(() => {
     setOpen(false);
     router.refresh();
-  }
+  }, [router]);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -58,11 +66,17 @@ export function EntryDialog({
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>إضافة قيد جديد</DialogTitle>
+          {/* التبويبان يتشابهان في العين ويختلفان تماماً في الأثر: أحدهما يفتح
+              حساباً جديداً والآخر يُنقص رصيداً قائماً. الفرق مكتوب، لا مُستنتَج. */}
+          <DialogDescription>
+            اختر «علاج جديد» إذا كانت هذه أول مرة يُفتح فيها حساب هذا العلاج،
+            و«دفعة على علاج سابق» إذا كان المريض يسدّد على حالة مفتوحة.
+          </DialogDescription>
         </DialogHeader>
         <Tabs defaultValue="new">
           <TabsList className="h-11 w-full">
-            <TabsTrigger value="new">جديد</TabsTrigger>
-            <TabsTrigger value="payment">دفعة</TabsTrigger>
+            <TabsTrigger value="new">علاج جديد</TabsTrigger>
+            <TabsTrigger value="payment">دفعة على علاج سابق</TabsTrigger>
           </TabsList>
 
           <TabsContent value="new">
@@ -106,24 +120,16 @@ function NewCaseForm({
     createVisitNewCase,
     {},
   );
-  const first = treatments[0];
-  const [treatmentId, setTreatmentId] = useState(first ? String(first.id) : "");
-  const [price, setPrice] = useState(first ? String(first.defaultPrice) : "0");
-  const done = useRef(false);
+  // لا سعر مقترَح: سعر العلاج يُتّفق عليه مع كل مريض على حدة، فيُكتب هنا يدوياً.
+  const [price, setPrice] = useState("");
+  const [discount, setDiscount] = useState("0");
+  const [paidNow, setPaidNow] = useState("0");
 
-  useEffect(() => {
-    if (state.ok && !done.current) {
-      done.current = true;
-      onSuccess();
-    }
-  }, [state.ok, onSuccess]);
+  useActionToast(state, "تم حفظ العلاج الجديد ودفعته", onSuccess);
 
-  function onTreatmentChange(e: React.ChangeEvent<HTMLSelectElement>) {
-    const id = e.target.value;
-    setTreatmentId(id);
-    const t = treatments.find((x) => String(x.id) === id);
-    if (t) setPrice(String(t.defaultPrice));
-  }
+  // الحساب الحيّ — عرض فقط. الخادم يعيد حساب الرقم نفسه عند الحفظ.
+  const net = Math.max(0, parseAmount(price) - parseAmount(discount));
+  const remaining = net - parseAmount(paidNow);
 
   return (
     <form action={formAction} className="space-y-3 pt-3">
@@ -167,20 +173,24 @@ function NewCaseForm({
         </NativeSelect>
       </div>
 
+      {/* العلاج يُكتب باليد: أسماء العلاجات تختلف من عيادة إلى أخرى ومن حالة إلى
+          أخرى، والأسماء المستعملة سابقاً تُقترح هنا فتُكتب مرة واحدة فقط. */}
       <div className="space-y-2">
         <Label htmlFor="nc-treatment">العلاج</Label>
-        <NativeSelect
+        <Input
           id="nc-treatment"
-          name="treatmentTypeId"
-          value={treatmentId}
-          onChange={onTreatmentChange}
-        >
+          name="treatmentName"
+          list="nc-treatment-list"
+          required
+          autoComplete="off"
+          className="h-11"
+          placeholder="حشوة، قلع، تنظيف…"
+        />
+        <datalist id="nc-treatment-list">
           {treatments.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.nameAr}
-            </option>
+            <option key={t.id} value={t.nameAr} />
           ))}
-        </NativeSelect>
+        </datalist>
       </div>
 
       <div className="grid grid-cols-2 gap-3">
@@ -191,6 +201,7 @@ function NewCaseForm({
             name="price"
             inputMode="numeric"
             className="h-11"
+            placeholder="0"
             value={price}
             onChange={(e) => setPrice(e.target.value)}
           />
@@ -202,7 +213,8 @@ function NewCaseForm({
             name="discount"
             inputMode="numeric"
             className="h-11"
-            defaultValue="0"
+            value={discount}
+            onChange={(e) => setDiscount(e.target.value)}
           />
         </div>
       </div>
@@ -215,7 +227,8 @@ function NewCaseForm({
             name="paidNow"
             inputMode="numeric"
             className="h-11"
-            defaultValue="0"
+            value={paidNow}
+            onChange={(e) => setPaidNow(e.target.value)}
           />
         </div>
         <div className="space-y-2">
@@ -223,6 +236,16 @@ function NewCaseForm({
           <Input id="nc-date" name="date" type="date" className="h-11" defaultValue={date} />
         </div>
       </div>
+
+      {/* لا يظهر السطر على نموذج فارغ: بلا سعر مكتوب لا معنى لصافٍ ولا لمتبقٍ. */}
+      {price.trim() ? (
+        <MoneySummary
+          figures={[
+            { label: "الصافي", amount: net },
+            { label: "المتبقي", amount: remaining, emphasis: true },
+          ]}
+        />
+      ) : null}
 
       {state.error ? <p className="text-destructive text-sm">{state.error}</p> : null}
 
@@ -247,20 +270,17 @@ function PaymentForm({
     addVisitPayment,
     {},
   );
-  const done = useRef(false);
 
   // البحث يجري على الخادم — العيادة فيها مئات البطاقات المفتوحة. [D3]
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<CaseBrief[]>(openCases);
   const [searching, startSearch] = useTransition();
   const latest = useRef(0);
+  const [chosenId, setChosenId] = useState("");
+  const [amount, setAmount] = useState("");
+  const [kind, setKind] = useState<PaymentKind>("session");
 
-  useEffect(() => {
-    if (state.ok && !done.current) {
-      done.current = true;
-      onSuccess();
-    }
-  }, [state.ok, onSuccess]);
+  useActionToast(state, "تمت إضافة الدفعة بنجاح", onSuccess);
 
   function runSearch(next: string) {
     setQuery(next);
@@ -275,13 +295,26 @@ function PaymentForm({
   if (openCases.length === 0 && query.trim() === "") {
     return (
       <p className="text-muted-foreground py-6 text-center text-sm">
-        لا توجد حالات عليها رصيد لإضافة دفعة إليها. أنشئ حالة جديدة من تبويب «جديد».
+        لا توجد حالات عليها رصيد لإضافة دفعة إليها. افتح حالة من تبويب «علاج
+        جديد».
       </p>
     );
   }
 
-  const kinds = ["session", "down_payment", "adjustment", "refund"] as const;
   const truncated = query.trim() === "" && totalCollectable > openCases.length;
+
+  // اختيار الحالة يتبع نتائج البحث: ما لم تعد الحالة المختارة ضمن النتائج،
+  // يعود الاختيار إلى أولها — وهو نفسه ما يقرأه السطر الحيّ أسفل المبلغ.
+  const selectedId = results.some((c) => String(c.id) === chosenId)
+    ? chosenId
+    : results[0]
+      ? String(results[0].id)
+      : "";
+  const selected = results.find((c) => String(c.id) === selectedId);
+  // الاسترجاع يزيد الرصيد المطلوب بدل أن يُنقصه — نفس ما تفعله طبقة الدفعات.
+  const afterPayment = selected
+    ? selected.remaining + (kind === "refund" ? 1 : -1) * parseAmount(amount)
+    : 0;
 
   return (
     <form action={formAction} className="space-y-3 pt-3">
@@ -315,8 +348,8 @@ function PaymentForm({
           <NativeSelect
             id="pv-case"
             name="caseId"
-            key={results[0]?.id ?? "empty"}
-            defaultValue={String(results[0].id)}
+            value={selectedId}
+            onChange={(e) => setChosenId(e.target.value)}
           >
             {results.map((c) => (
               <option key={c.id} value={c.id}>
@@ -335,13 +368,28 @@ function PaymentForm({
           inputMode="numeric"
           className="h-11"
           placeholder="0"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
         />
+        {selected ? (
+          <MoneySummary
+            figures={[
+              { label: "رصيد الحالة", amount: selected.remaining },
+              { label: "بعد الدفعة", amount: afterPayment, emphasis: true },
+            ]}
+          />
+        ) : null}
       </div>
 
       <div className="space-y-2">
         <Label htmlFor="pv-kind">النوع</Label>
-        <NativeSelect id="pv-kind" name="kind" defaultValue="session">
-          {kinds.map((k) => (
+        <NativeSelect
+          id="pv-kind"
+          name="kind"
+          value={kind}
+          onChange={(e) => setKind(e.target.value as PaymentKind)}
+        >
+          {PAYMENT_KINDS.map((k) => (
             <option key={k} value={k}>
               {PAYMENT_KIND_LABELS[k]}
             </option>

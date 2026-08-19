@@ -30,6 +30,13 @@ function revalidateOrtho(caseId?: number) {
 }
 
 // ── New ortho case (with optional down payment) ─────────────────────────────
+/**
+ * فتح حالة تقويم — بلا إجمالي متفق عليه. [قرار العيادة 2026-08-19]
+ *
+ * التقويم يُتابع شهوراً: مقدمة في البداية، ثم مبلغ يُكتب عند كل جلسة. لا يوجد
+ * رقم نهائي يُتفق عليه يوم الفتح، فالحالة تُحفظ بإجمالي صفر وتبقى مفتوحة،
+ * ولا يظهر لها «متبقٍ» في أي شاشة ولا في الديون.
+ */
 export async function createOrthoCase(
   _prev: OrthoFormState,
   formData: FormData,
@@ -39,8 +46,6 @@ export async function createOrthoCase(
     patientName: z.string().trim().min(1),
     phone: z.string().trim().optional(),
     doctorId: z.coerce.number().int().positive(),
-    total: z.string().optional(),
-    discount: z.string().optional(),
     downPayment: z.string().optional(),
     openedDate: z.string().optional(),
     nextAppointment: z.string().optional(),
@@ -58,16 +63,9 @@ export async function createOrthoCase(
   }
 
   // All money computed server-side, integer dinars only.
-  const total = parseAmount(d.total ?? "");
-  const discount = parseAmount(d.discount ?? "");
   const downPayment = parseAmount(d.downPayment ?? "");
+  if (downPayment < 0) return { error: "المبالغ يجب أن تكون موجبة." };
 
-  if (total <= 0) return { error: "أدخل الإجمالي المتفق عليه." };
-  if (discount < 0 || downPayment < 0) return { error: "المبالغ يجب أن تكون موجبة." };
-  if (downPayment > total) return { error: "المقدمة أكبر من الإجمالي المتفق عليه." };
-
-  // listPrice = السعر قبل الخصم (يُحفظ لاتساق total = listPrice − discount).
-  const listPrice = total + discount;
   const openedDate =
     d.openedDate && isValidISODate(d.openedDate) ? d.openedDate : todayISO();
   const nextAppointment =
@@ -83,9 +81,10 @@ export async function createOrthoCase(
     doctorId: d.doctorId,
     treatmentTypeId,
     openedDate,
-    listPrice,
-    discount,
-    totalPrice: total,
+    // صفر في الثلاثة: لا سعر قائمة ولا خصم ولا إجمالي — المال كله دفعات.
+    listPrice: 0,
+    discount: 0,
+    totalPrice: 0,
     notes: null,
     firstPayment:
       downPayment > 0 ? { amount: downPayment, kind: "down_payment" } : undefined,

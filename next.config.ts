@@ -4,6 +4,15 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   // better-sqlite3 is a native module — keep it out of the bundle.
   serverExternalPackages: ["better-sqlite3"],
+  // This app is developed and run at 127.0.0.1 — `npm start` binds there, so
+  // that is the address in the browser and in the Electron shell. Next 16 dev
+  // serves /_next/* only to hosts it recognises, and 127.0.0.1 is not the same
+  // host as localhost to that check: every client chunk is refused, the page
+  // renders from HTML and never hydrates. Dialogs stop opening, toasts never
+  // fire, and anything client-driven looks broken while server-rendered links
+  // keep working — which reads like a bug in the feature, not in the dev
+  // server. Production ignores this setting entirely.
+  allowedDevOrigins: ["127.0.0.1"],
   // Emit .next/standalone: a self-contained server the Electron wrapper can
   // launch with a plain Node runtime, with no node_modules install on the
   // clinic laptop. [packaging]

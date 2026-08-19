@@ -5,19 +5,50 @@ import {
   doctors,
   patients,
   treatmentTypes,
-  priceList,
   cases,
   payments,
   appointments,
   cashMovements,
   auditLog,
   expenses,
+  labEntries,
 } from "@/lib/db/schema";
 import { cashOnHand, getSettings } from "@/lib/server-utils";
-import { currentPeriod, todayISO } from "@/lib/dates";
+import { currentPeriod, shiftISOByDays, todayISO } from "@/lib/dates";
+import { ORTHO_BUCKET, XRAY_BUCKET } from "@/lib/strings";
+
+/**
+ * The appointment status column is a union, so a filter arriving as a raw query
+ * string has to be narrowed before it can be compared — an unknown ?status is
+ * dropped rather than passed through to SQL.
+ */
+type ApptStatus = "booked" | "came" | "no_show";
+function isApptStatus(s: string | undefined | null): s is ApptStatus {
+  return s === "booked" || s === "came" || s === "no_show";
+}
 
 // Correlated "amount paid on a case" (refunds are negative, so they net out).
 const paidExpr = sql<number>`coalesce((select sum(p.amount) from payments p where p.case_id = cases.id), 0)`;
+
+/**
+ * التقويم لا يُحسب ديناً على المريض أبداً. [قرار العيادة 2026-08-19]
+ *
+ * لا يوجد إجمالي متفق عليه في التقويم، فالفرق بين إجمالي الحالة والمدفوع ليس
+ * رصيداً مطلوباً. الاستثناء بالدلو لا بالإجمالي، حتى تخرج معه الحالات القديمة
+ * التي ما زالت تحمل إجمالياً محفوظاً في قاعدة البيانات.
+ */
+const notOrtho = sql`${treatmentTypes.settlementBucket} <> ${ORTHO_BUCKET}`;
+
+/**
+ * Does the system hold any clinical record at all?
+ *
+ * Patients are the right proxy: nothing else — a case, a payment, an
+ * appointment — can exist without one. Used to decide whether a demo fill is
+ * safe and whether the app is on its very first run.
+ */
+export function hasAnyRecords(): boolean {
+  return !!db.select({ id: patients.id }).from(patients).limit(1).get();
+}
 
 // ── Reference lists ─────────────────────────────────────────────────────────
 export function listDoctors(opts: { activeOnly?: boolean } = {}) {
@@ -26,6 +57,13 @@ export function listDoctors(opts: { activeOnly?: boolean } = {}) {
   return opts.activeOnly ? rows.filter((d) => d.isActive) : rows;
 }
 
+/**
+ * أنواع العلاج المُفعّلة — بلا سعر.
+ *
+ * «قائمة الأسعار» أُزيلت 2026-08-19: أسعار العيادة تختلف من مريض إلى آخر،
+ * فيُكتب السعر في كل حالة على حدة ولا يقترحه النظام. جدول `price_list` بقي في
+ * قاعدة البيانات خاملاً (بياناته التاريخية وسجل تعديلاته لا تُحذف).
+ */
 export function listTreatmentTypes() {
   return db
     .select({
@@ -36,11 +74,8 @@ export function listTreatmentTypes() {
       settlementBucket: treatmentTypes.settlementBucket,
       isImplant: treatmentTypes.isImplant,
       isOrtho: treatmentTypes.isOrtho,
-      defaultPrice: sql<number>`coalesce(${priceList.defaultPrice}, 0)`,
-      isPlaceholder: priceList.isPlaceholder,
     })
     .from(treatmentTypes)
-    .leftJoin(priceList, eq(priceList.treatmentTypeId, treatmentTypes.id))
     .where(eq(treatmentTypes.isActive, true))
     .orderBy(treatmentTypes.sortOrder)
     .all();
@@ -50,18 +85,123 @@ export function getTreatmentType(id: number) {
   return db.select().from(treatmentTypes).where(eq(treatmentTypes.id, id)).get();
 }
 
+/**
+ * الاقتراحات أسفل حقل «العلاج» في الدفتر اليومي — الأسماء المستعملة سابقاً.
+ *
+ * Only the `normal` bucket: implants, ortho and X-rays are opened from their
+ * own screens, so offering their names here would only invite the refusal the
+ * mutation would answer with. [D9]
+ *
+ * Ordered by the last time each name was actually used, so the treatments this
+ * clinic does every day sit at the top and a name typed once a year sinks. The
+ * correlation is written as `"treatment_types"."id"` on purpose: a single-table
+ * select renders an interpolated column as a bare `id`, which inside a
+ * sub-select aliasing `cases c` would resolve to the case's own id. [D3]
+ */
+export function normalTreatmentSuggestions(limit = 30) {
+  const lastUsed = sql<string | null>`(
+    select max(c.opened_date) from cases c
+    where c.treatment_type_id = "treatment_types"."id"
+  )`;
+  return db
+    .select({ id: treatmentTypes.id, nameAr: treatmentTypes.nameAr })
+    .from(treatmentTypes)
+    .where(
+      and(
+        eq(treatmentTypes.isActive, true),
+        eq(treatmentTypes.settlementBucket, "normal"),
+      ),
+    )
+    .orderBy(sql`${lastUsed} desc nulls last`, treatmentTypes.sortOrder)
+    .limit(Math.min(100, Math.max(1, limit)))
+    .all();
+}
+
 // ── Patients ────────────────────────────────────────────────────────────────
-export function searchPatients(q: string, limit = 30) {
-  const term = `%${q.trim()}%`;
+export interface PatientsListOptions {
+  /** جزء من الاسم أو رقم الهاتف. */
+  q?: string;
+  /** المرضى الذين عالجهم هذا الطبيب. */
+  doctorId?: number;
+  /** المرضى الذين عليهم رصيد متبقٍ. */
+  hasBalance?: boolean;
+  /** المرضى الذين راجعوا خلال هذا العدد من الأيام. */
+  visitedWithinDays?: number;
+}
+
+/**
+ * قائمة المرضى مع الفلاتر — كلها على الخادم.
+ *
+ * Every filter is an `exists` sub-select rather than a join: a patient with
+ * four cases must appear once, and once only, whichever filters are combined.
+ * The correlation is written as `"patients"."id"` on purpose — a single-table
+ * select renders an interpolated column as a bare `id`, which inside a
+ * sub-select that aliases `cases c` would silently resolve to the case's own
+ * id and match every row. [D3]
+ */
+export function patientsList(opts: PatientsListOptions = {}, limit = 50) {
+  const q = opts.q?.trim() ?? "";
+  const conditions = [];
+
+  if (q) {
+    const term = `%${q}%`;
+    conditions.push(
+      sql`(${patients.fullName} like ${term} or ${patients.phone} like ${term})`,
+    );
+  }
+
+  if (opts.doctorId && Number.isInteger(opts.doctorId) && opts.doctorId > 0) {
+    conditions.push(sql`exists (
+      select 1 from cases c
+      where c.patient_id = "patients"."id" and c.doctor_id = ${opts.doctorId}
+    )`);
+  }
+
+  if (opts.hasBalance) {
+    // التقويم مستثنى هنا كما هو مستثنى في «الديون»: حالة تقويم قديمة ما زالت
+    // تحمل إجمالياً محفوظاً كانت تُظهر صاحبها مديناً في هذه الشاشة بينما لا
+    // يظهر في شاشة الديون — رقمان متناقضان عن المريض نفسه. [2026-08-19]
+    conditions.push(sql`exists (
+      select 1 from cases c
+      join treatment_types tt on tt.id = c.treatment_type_id
+      where c.patient_id = "patients"."id"
+        and c.status != 'cancelled'
+        and tt.settlement_bucket <> ${ORTHO_BUCKET}
+        and c.total_price - coalesce(
+          (select sum(p.amount) from payments p where p.case_id = c.id), 0
+        ) > 0
+    )`);
+  }
+
+  if (opts.visitedWithinDays && opts.visitedWithinDays > 0) {
+    // «راجع» = دفع شيئاً أو حضر موعده. الموعد المحجوز وحده ليس مراجعة.
+    const cutoff = shiftISOByDays(todayISO(), -opts.visitedWithinDays);
+    conditions.push(sql`(
+      exists (
+        select 1 from payments p
+        join cases c on c.id = p.case_id
+        where c.patient_id = "patients"."id" and p.paid_date >= ${cutoff}
+      )
+      or exists (
+        select 1 from appointments a
+        where a.patient_id = "patients"."id"
+          and a.appt_date >= ${cutoff}
+          and a.status = 'came'
+      )
+    )`);
+  }
+
   const base = db.select().from(patients);
-  const rows = q.trim()
-    ? base
-        .where(sql`${patients.fullName} like ${term} or ${patients.phone} like ${term}`)
-        .orderBy(patients.fullName)
-        .limit(limit)
-        .all()
-    : base.orderBy(desc(patients.id)).limit(limit).all();
-  return rows;
+  const filtered = conditions.length ? base.where(and(...conditions)) : base;
+  // A search reads best alphabetically; an unfiltered list reads best newest-first.
+  return filtered
+    .orderBy(q ? patients.fullName : desc(patients.id))
+    .limit(Math.min(200, Math.max(1, limit)))
+    .all();
+}
+
+export function searchPatients(q: string, limit = 30) {
+  return patientsList({ q }, limit);
 }
 
 export function patientById(id: number) {
@@ -73,6 +213,8 @@ export interface CaseRow {
   id: number;
   patientId: number;
   patientName: string;
+  /** JSON column as stored — read it with parseMedicalFlags. */
+  patientMedicalFlags: string | null;
   doctorId: number;
   doctorName: string;
   treatment: string;
@@ -92,6 +234,10 @@ const caseSelect = {
   id: cases.id,
   patientId: cases.patientId,
   patientName: patients.fullName,
+  // Rides along with the name so every case screen can warn without a second
+  // query: the doctor must not have to open the patient file to learn he is
+  // about to treat a bleeder.
+  patientMedicalFlags: patients.medicalFlags,
   doctorId: cases.doctorId,
   doctorName: doctors.name,
   treatment: treatmentTypes.nameAr,
@@ -187,15 +333,18 @@ export function dailyLedger(date: string) {
  * unbounded list here is unusable at real clinic scale. [D3]
  * Includes `completed` cases that still carry a balance — the clinic is still
  * chasing that money. [A4]
+ * Ortho is out: its sessions are priced and added from /ortho/[id] only, the
+ * same way implants and X-rays are managed from their own screens. [2026-08-19]
  */
 export function openCasesBrief(q = "", limit = 40) {
   const term = `%${q.trim()}%`;
-  const collectable = sql`${cases.status} != 'cancelled' and (${cases.totalPrice} - (${paidExpr})) > 0`;
+  const collectable = sql`${cases.status} != 'cancelled' and (${cases.totalPrice} - (${paidExpr})) > 0 and ${notOrtho}`;
 
   return db
     .select({
       id: cases.id,
       patientName: patients.fullName,
+      patientMedicalFlags: patients.medicalFlags,
       phone: patients.phone,
       treatment: treatmentTypes.nameAr,
       remaining: sql<number>`${cases.totalPrice} - (${paidExpr})`,
@@ -216,20 +365,44 @@ export function openCasesBrief(q = "", limit = 40) {
     .all();
 }
 
-/** How many collectable cases exist, so the picker can say it is truncated. */
+/**
+ * How many collectable cases exist, so the picker can say it is truncated.
+ * Counts exactly what `openCasesBrief` would list — ortho excluded. [2026-08-19]
+ */
 export function collectableCaseCount(): number {
   return (
     db
       .select({ v: sql<number>`count(*)` })
       .from(cases)
-      .where(sql`${cases.status} != 'cancelled' and (${cases.totalPrice} - (${paidExpr})) > 0`)
+      .innerJoin(treatmentTypes, eq(cases.treatmentTypeId, treatmentTypes.id))
+      .where(
+        sql`${cases.status} != 'cancelled' and (${cases.totalPrice} - (${paidExpr})) > 0 and ${notOrtho}`,
+      )
       .get()?.v ?? 0
   );
 }
 
 // ── Appointments (السجل الرئيسي) [B1] ────────────────────────────────────────
-/** One day's bookings: who is expected, with which doctor, and did they come. */
-export function appointmentsForDate(date: string) {
+/**
+ * One day's bookings: who is expected, with which doctor, and did they come.
+ *
+ * The doctor/status filters run here rather than in the page: the register is
+ * the busiest screen in the clinic and a day can carry every doctor at once,
+ * so narrowing it in SQL keeps the filtered view as cheap as the plain one.
+ * [2026-08-19]
+ */
+export function appointmentsForDate(
+  date: string,
+  filters: { doctorId?: number | null; status?: string } = {},
+) {
+  const conds = [eq(appointments.apptDate, date)];
+  if (filters.doctorId != null) {
+    conds.push(eq(appointments.doctorId, filters.doctorId));
+  }
+  if (isApptStatus(filters.status)) {
+    conds.push(eq(appointments.status, filters.status));
+  }
+
   return db
     .select({
       id: appointments.id,
@@ -245,7 +418,7 @@ export function appointmentsForDate(date: string) {
     .from(appointments)
     .innerJoin(patients, eq(appointments.patientId, patients.id))
     .leftJoin(doctors, eq(appointments.doctorId, doctors.id))
-    .where(eq(appointments.apptDate, date))
+    .where(and(...conds))
     .orderBy(doctors.sortOrder, appointments.id)
     .all();
 }
@@ -267,10 +440,105 @@ export function appointmentCountsForDate(date: string) {
   };
 }
 
+/**
+ * One row per day that has bookings in "YYYY-MM", for the month grid.
+ *
+ * Returned as a Map keyed by date so the grid can look a cell up without
+ * scanning: a month view renders 42 cells and the clinic's laptop is slow.
+ * The same doctor/status filter as the day view applies, so switching views
+ * never silently widens what is being looked at. [2026-08-19]
+ */
+export function appointmentCountsForMonth(
+  period: string,
+  filters: { doctorId?: number | null; status?: string } = {},
+) {
+  const conds = [sql`substr(${appointments.apptDate}, 1, 7) = ${period}`];
+  if (filters.doctorId != null) {
+    conds.push(eq(appointments.doctorId, filters.doctorId));
+  }
+  if (isApptStatus(filters.status)) {
+    conds.push(eq(appointments.status, filters.status));
+  }
+
+  const rows = db
+    .select({
+      apptDate: appointments.apptDate,
+      status: appointments.status,
+      n: sql<number>`count(*)`,
+    })
+    .from(appointments)
+    .where(and(...conds))
+    .groupBy(appointments.apptDate, appointments.status)
+    .all();
+
+  const byDate = new Map<
+    string,
+    { booked: number; came: number; noShow: number; total: number }
+  >();
+  for (const r of rows) {
+    const cell =
+      byDate.get(r.apptDate) ?? { booked: 0, came: 0, noShow: 0, total: 0 };
+    if (r.status === "booked") cell.booked += r.n;
+    else if (r.status === "came") cell.came += r.n;
+    else if (r.status === "no_show") cell.noShow += r.n;
+    cell.total += r.n;
+    byDate.set(r.apptDate, cell);
+  }
+  return byDate;
+}
+
+/** One appointment by id — the rebook action copies patient/doctor from it. */
+export function appointmentById(id: number) {
+  return db
+    .select({
+      id: appointments.id,
+      patientId: appointments.patientId,
+      doctorId: appointments.doctorId,
+      apptDate: appointments.apptDate,
+      status: appointments.status,
+      note: appointments.note,
+    })
+    .from(appointments)
+    .where(eq(appointments.id, id))
+    .get();
+}
+
+/**
+ * The next still-booked appointments from `fromDate` onward.
+ *
+ * Only "booked" — a past-dated visit already marked حضر is history, and the
+ * point of this list is what the clinic still has to prepare for.
+ */
+export function upcomingAppointments(fromDate: string, limit = 8) {
+  return db
+    .select({
+      id: appointments.id,
+      patientId: appointments.patientId,
+      patientName: patients.fullName,
+      phone: patients.phone,
+      doctorName: doctors.name,
+      apptDate: appointments.apptDate,
+      note: appointments.note,
+    })
+    .from(appointments)
+    .innerJoin(patients, eq(appointments.patientId, patients.id))
+    .leftJoin(doctors, eq(appointments.doctorId, doctors.id))
+    .where(
+      and(
+        sql`${appointments.apptDate} > ${fromDate}`,
+        eq(appointments.status, "booked"),
+      ),
+    )
+    .orderBy(appointments.apptDate, appointments.id)
+    .limit(Math.min(50, Math.max(1, limit)))
+    .all();
+}
+
 // ── Debts call-list (سجل الديون) ─────────────────────────────────────────────
 /**
  * Outstanding balances for the call-list. Phone and last-payment date are
  * correlated sub-selects rather than a query per row (was 2N+1). [D6]
+ * Ortho never appears here: there is no agreed total to owe. [2026-08-19]
  */
 export function debtsList() {
   return db
@@ -285,7 +553,9 @@ export function debtsList() {
     .innerJoin(patients, eq(cases.patientId, patients.id))
     .innerJoin(doctors, eq(cases.doctorId, doctors.id))
     .innerJoin(treatmentTypes, eq(cases.treatmentTypeId, treatmentTypes.id))
-    .where(sql`(${cases.totalPrice} - (${paidExpr})) > 0 and ${cases.status} != 'cancelled'`)
+    .where(
+      sql`(${cases.totalPrice} - (${paidExpr})) > 0 and ${cases.status} != 'cancelled' and ${notOrtho}`,
+    )
     .orderBy(sql`(${cases.totalPrice} - (${paidExpr})) desc`)
     .all();
 }
@@ -301,16 +571,27 @@ export function implantIndex(q = "") {
   return rows.filter(
     (r) =>
       r.patientName.toLowerCase().includes(term) ||
-      String(r.implantCardNo ?? "").includes(term) ||
-      String(r.accountSeqNo ?? "").includes(term),
+      String(r.implantCardNo ?? "").includes(term),
   );
 }
 
 // ── Ortho register (سجل التقويم) ─────────────────────────────────────────────
+/**
+ * سجل التقويم — مقدمة ومدفوع، بلا إجمالي ولا متبقٍ. [2026-08-19]
+ *
+ * The register shows the two numbers that exist for an open-ended ortho case:
+ * what was taken up front, and what the case has collected in total since. The
+ * down payment is a correlated sub-select for the same reason `paid` is — one
+ * query for the whole list, never one per row. [D6]
+ */
 export function orthoCases(q = "") {
   const rows = db
     .select({
       ...caseSelect,
+      downPayment: sql<number>`coalesce((
+        select sum(p.amount) from payments p
+        where p.case_id = cases.id and p.kind = 'down_payment'
+      ), 0)`,
       hasComplaint: cases.hasComplaint,
       complaintNote: cases.complaintNote,
       nextAppointment: cases.nextAppointment,
@@ -326,6 +607,100 @@ export function orthoCases(q = "") {
   if (!q.trim()) return rows;
   const term = q.trim().toLowerCase();
   return rows.filter((r) => r.patientName.toLowerCase().includes(term));
+}
+
+// ── X-rays (سجل الأشعة) [D9] ─────────────────────────────────────────────────
+/** The X-ray treatment types, with their current price-list price. */
+export function listXrayTreatmentTypes() {
+  return listTreatmentTypes().filter((t) => t.settlementBucket === XRAY_BUCKET);
+}
+
+/** True when this treatment type bills an X-ray rather than dental work. */
+export function isXrayTreatment(treatmentTypeId: number): boolean {
+  const row = db
+    .select({ bucket: treatmentTypes.settlementBucket })
+    .from(treatmentTypes)
+    .where(eq(treatmentTypes.id, treatmentTypeId))
+    .get();
+  return row?.bucket === XRAY_BUCKET;
+}
+
+/**
+ * One month of X-rays: the films taken (by open date) and the cash they brought
+ * in (by payment date).
+ *
+ * The two are counted on different dates on purpose. «كم صورة أُخذت هذا الشهر»
+ * is a question about work done; «كم دخل من الأشعة هذا الشهر» is a question
+ * about money received, and a film taken in March that is paid for in April is
+ * honestly reported in both months — one as work, the other as income. Mixing
+ * them into a single number would make the page disagree with both the daily
+ * ledger and the monthly settlement.
+ */
+export function xraysForMonth(period: string) {
+  const inPeriod = sql`substr(${cases.openedDate}, 1, 7) = ${period}`;
+
+  const rows = db
+    .select({
+      ...caseSelect,
+      phone: patients.phone,
+      treatmentKey: treatmentTypes.key,
+      note: cases.notes,
+    })
+    .from(cases)
+    .innerJoin(patients, eq(cases.patientId, patients.id))
+    .innerJoin(doctors, eq(cases.doctorId, doctors.id))
+    .innerJoin(treatmentTypes, eq(cases.treatmentTypeId, treatmentTypes.id))
+    .where(and(eq(treatmentTypes.settlementBucket, XRAY_BUCKET), inPeriod))
+    .orderBy(desc(cases.openedDate), desc(cases.id))
+    .all();
+
+  const byType = db
+    .select({
+      key: treatmentTypes.key,
+      nameAr: treatmentTypes.nameAr,
+      count: sql<number>`count(*)`,
+      billed: sql<number>`coalesce(sum(${cases.totalPrice}), 0)`,
+    })
+    .from(cases)
+    .innerJoin(treatmentTypes, eq(cases.treatmentTypeId, treatmentTypes.id))
+    .where(and(eq(treatmentTypes.settlementBucket, XRAY_BUCKET), inPeriod))
+    .groupBy(treatmentTypes.id)
+    .orderBy(treatmentTypes.sortOrder)
+    .all();
+
+  const billed = rows.reduce((s, r) => s + r.totalPrice, 0);
+  const outstanding = rows.reduce((s, r) => s + Math.max(0, r.remaining), 0);
+
+  return {
+    rows,
+    byType,
+    count: rows.length,
+    billed,
+    outstanding,
+    /** Cash received this month on any X-ray, whenever the film was taken. */
+    collected: xrayIncomeForPeriod(period),
+  };
+}
+
+/**
+ * X-ray cash received in a period. This is the clinic's own income line: it is
+ * summed here and nowhere inside the per-doctor settlement. [D9]
+ */
+export function xrayIncomeForPeriod(period: string): number {
+  return (
+    db
+      .select({ v: sql<number>`coalesce(sum(${payments.amount}), 0)` })
+      .from(payments)
+      .innerJoin(cases, eq(payments.caseId, cases.id))
+      .innerJoin(treatmentTypes, eq(cases.treatmentTypeId, treatmentTypes.id))
+      .where(
+        and(
+          eq(treatmentTypes.settlementBucket, XRAY_BUCKET),
+          sql`substr(${payments.paidDate}, 1, 7) = ${period}`,
+        ),
+      )
+      .get()?.v ?? 0
+  );
 }
 
 // ── Expenses (سجل الصرفيات) ──────────────────────────────────────────────────
@@ -414,22 +789,43 @@ export function dashboardStats() {
     db.select({ v: sql<number>`coalesce(sum(${payments.amount}),0)` }).from(payments).where(monthFilter).get()?.v ?? 0;
   const monthExpenses =
     db.select({ v: sql<number>`coalesce(sum(${expenses.amount}),0)` }).from(expenses).where(sql`substr(${expenses.expenseDate},1,7) = ${period}`).get()?.v ?? 0;
+  // نفس استثناء التقويم المطبَّق في «الديون» — الرقمان يجب أن يتطابقا. [2026-08-19]
   const outstanding =
-    db.select({ v: sql<number>`coalesce(sum(${cases.totalPrice} - (${paidExpr})),0)` }).from(cases).where(sql`(${cases.totalPrice} - (${paidExpr})) > 0 and ${cases.status} != 'cancelled'`).get()?.v ?? 0;
+    db
+      .select({ v: sql<number>`coalesce(sum(${cases.totalPrice} - (${paidExpr})),0)` })
+      .from(cases)
+      .innerJoin(treatmentTypes, eq(cases.treatmentTypeId, treatmentTypes.id))
+      .where(
+        sql`(${cases.totalPrice} - (${paidExpr})) > 0 and ${cases.status} != 'cancelled' and ${notOrtho}`,
+      )
+      .get()?.v ?? 0;
   const openImplants =
     db.select({ v: sql<number>`count(*)` }).from(cases).innerJoin(treatmentTypes, eq(cases.treatmentTypeId, treatmentTypes.id)).where(and(eq(treatmentTypes.isImplant, true), eq(cases.status, "open"))).get()?.v ?? 0;
 
-  // Net of refunds (stored negative), so these rows always sum to
-  // monthCollected above and to the settlement screen. [A7]
+  // X-ray money is the clinic's, so it is lifted out of the per-doctor rows and
+  // shown on its own line. [D9]
+  const monthXray = xrayIncomeForPeriod(period);
+
+  // Net of refunds (stored negative). These rows carry exactly what the
+  // settlement screen credits to each doctor, so the two screens always agree;
+  // together with the X-ray line they still add up to monthCollected. [A7][D9]
   const perDoctorMonth = db
     .select({
       doctorId: doctors.id,
       doctorName: doctors.name,
-      collected: sql<number>`coalesce(sum(${payments.amount}),0)`,
+      // "doctors"."id" is written out rather than interpolated: a single-table
+      // select renders an interpolated column as a bare `id`, which is
+      // ambiguous once this subquery joins three tables of its own.
+      collected: sql<number>`coalesce((
+        select sum(p.amount) from payments p
+        join cases c on c.id = p.case_id
+        join treatment_types t on t.id = c.treatment_type_id
+        where p.doctor_id = "doctors"."id"
+          and substr(p.paid_date, 1, 7) = ${period}
+          and t.settlement_bucket <> ${XRAY_BUCKET}
+      ), 0)`,
     })
     .from(doctors)
-    .leftJoin(payments, and(eq(payments.doctorId, doctors.id), monthFilter))
-    .groupBy(doctors.id)
     .orderBy(doctors.sortOrder)
     .all();
 
@@ -445,10 +841,84 @@ export function dashboardStats() {
     reserveThreshold: s.cashReserveThreshold,
     todayCollected,
     monthCollected,
+    monthXray,
     monthExpenses,
     outstanding,
     openImplants,
     apptToday,
     perDoctorMonth,
   };
+}
+
+// ── الأطباء + مستحقات المختبر ────────────────────────────────────────────────
+/** One doctor by id, for the doctor page. */
+export function doctorById(id: number) {
+  return db.select().from(doctors).where(eq(doctors.id, id)).get();
+}
+
+/**
+ * A doctor's lab entries in a period, newest first, with the patient name when
+ * the entry was tied to one.
+ */
+export function labEntriesForDoctor(doctorId: number, period: string) {
+  return db
+    .select({
+      id: labEntries.id,
+      branch: labEntries.branch,
+      entryDate: labEntries.entryDate,
+      amount: labEntries.amount,
+      note: labEntries.note,
+      patientId: labEntries.patientId,
+      patientName: patients.fullName,
+    })
+    .from(labEntries)
+    .leftJoin(patients, eq(labEntries.patientId, patients.id))
+    .where(
+      and(
+        eq(labEntries.doctorId, doctorId),
+        sql`substr(${labEntries.entryDate}, 1, 7) = ${period}`,
+      ),
+    )
+    .orderBy(desc(labEntries.entryDate), desc(labEntries.id))
+    .all();
+}
+
+/**
+ * Lab totals per doctor for a period, split by branch.
+ *
+ * Reported beside the settlement but never inside it: this is tracking, not
+ * payout. [قرار العيادة 2026-08-19]
+ */
+export function labDuesForPeriod(period: string) {
+  const rows = db
+    .select({
+      doctorId: labEntries.doctorId,
+      branch: labEntries.branch,
+      total: sql<number>`coalesce(sum(${labEntries.amount}), 0)`,
+    })
+    .from(labEntries)
+    .where(sql`substr(${labEntries.entryDate}, 1, 7) = ${period}`)
+    .groupBy(labEntries.doctorId, labEntries.branch)
+    .all();
+
+  const byDoctor = new Map<number, { fixed: number; mobile: number; total: number }>();
+  for (const r of rows) {
+    const cell = byDoctor.get(r.doctorId) ?? { fixed: 0, mobile: 0, total: 0 };
+    if (r.branch === "fixed") cell.fixed += r.total;
+    else cell.mobile += r.total;
+    cell.total += r.total;
+    byDoctor.set(r.doctorId, cell);
+  }
+  return byDoctor;
+}
+
+/** Grand total of lab dues in a period — the one info line on the settlement. */
+export function labDuesTotal(period: string): number {
+  return (
+    db
+      .select({ v: sql<number>`coalesce(sum(${labEntries.amount}), 0)` })
+      .from(labEntries)
+      .where(sql`substr(${labEntries.entryDate}, 1, 7) = ${period}`)
+      .get()?.v ?? 0
+  );
 }

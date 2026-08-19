@@ -5,18 +5,22 @@ import path from "node:path";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import * as schema from "./schema";
-import { databasePath } from "../paths";
+import { adoptLegacyDatabase, databasePath } from "../paths";
+
+// Carry a pre-rename dentest.db over to zuha.db. Must happen before the
+// connection below, which would otherwise create an empty file first.
+adoptLegacyDatabase();
 
 const dbPath = databasePath();
 // The data folder may not exist yet on a fresh install of the packaged app.
 fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
 const globalForDb = globalThis as unknown as {
-  __dentestSqlite?: Database.Database;
+  __zuhaSqlite?: Database.Database;
 };
 
 const sqlite =
-  globalForDb.__dentestSqlite ??
+  globalForDb.__zuhaSqlite ??
   (() => {
     const conn = new Database(dbPath);
     conn.pragma("journal_mode = WAL");
@@ -24,7 +28,7 @@ const sqlite =
     return conn;
   })();
 
-if (process.env.NODE_ENV !== "production") globalForDb.__dentestSqlite = sqlite;
+if (process.env.NODE_ENV !== "production") globalForDb.__zuhaSqlite = sqlite;
 
 export const db = drizzle(sqlite, { schema });
 export { schema, sqlite };

@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowRight, MapPin, Phone } from "lucide-react";
+import { ArrowRight, HeartPulse, MapPin, Phone } from "lucide-react";
 import { patientById, casesForPatient } from "@/lib/queries";
 import { formatIQD } from "@/lib/format";
 import { formatDateAr } from "@/lib/dates";
-import { CASE_STATUS_LABELS } from "@/lib/strings";
+import { CASE_STATUS_LABELS, ORTHO_BUCKET, medicalFlagsLine } from "@/lib/strings";
 import { cn } from "@/lib/utils";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -33,9 +34,14 @@ export default async function PatientProfilePage({
   const patient = patientById(Number(id));
   if (!patient) notFound();
 
+  const medicalLine = medicalFlagsLine(patient.medicalFlags);
   const cases = casesForPatient(patient.id);
+  // التقويم لا رصيد عليه: لا يوجد إجمالي متفق عليه، فالفرق بين الإجمالي
+  // المحفوظ والمدفوع ليس ديناً. يُستثنى هنا كما يُستثنى في «الديون» حتى لا
+  // يقرأ الموظف رقمين متناقضين عن المريض نفسه. [2026-08-19]
   const totalRemaining = cases.reduce(
-    (sum, c) => sum + (c.status === "cancelled" ? 0 : c.remaining),
+    (sum, c) =>
+      sum + (c.status === "cancelled" || c.bucket === ORTHO_BUCKET ? 0 : c.remaining),
     0,
   );
 
@@ -77,6 +83,20 @@ export default async function PatientProfilePage({
                 </p>
               ) : null}
             </div>
+
+            {/* تحذير الحالة الصحية — أعلى الملف، قبل أي رقم أو حالة. */}
+            {medicalLine || patient.medicalNotes ? (
+              <Alert className="border-amber-500/40 bg-amber-50 text-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
+                <HeartPulse className="text-amber-600" />
+                <AlertTitle>حالة صحية يجب الانتباه لها:</AlertTitle>
+                <AlertDescription className="text-amber-900/90 dark:text-amber-100/90">
+                  {medicalLine ? <p className="font-medium">{medicalLine}</p> : null}
+                  {patient.medicalNotes ? (
+                    <p className="whitespace-pre-line">{patient.medicalNotes}</p>
+                  ) : null}
+                </AlertDescription>
+              </Alert>
+            ) : null}
           </div>
           <PatientForm mode="edit" patient={patient} />
         </CardContent>
@@ -136,11 +156,18 @@ export default async function PatientProfilePage({
                         <span className="money">{formatIQD(c.paid)}</span>
                       </TableCell>
                       <TableCell className="text-end">
-                        <span
-                          className={cn("money", c.remaining > 0 && "text-destructive font-medium")}
-                        >
-                          {formatIQD(c.remaining)}
-                        </span>
+                        {c.bucket === ORTHO_BUCKET ? (
+                          <span className="text-muted-foreground">—</span>
+                        ) : (
+                          <span
+                            className={cn(
+                              "money",
+                              c.remaining > 0 && "text-destructive font-medium",
+                            )}
+                          >
+                            {formatIQD(c.remaining)}
+                          </span>
+                        )}
                       </TableCell>
                       <TableCell>
                         <Badge variant={STATUS_VARIANT[c.status] ?? "outline"}>

@@ -1,10 +1,13 @@
 import Link from "next/link";
-import { ChevronRight, ChevronLeft, Trash2 } from "lucide-react";
+import { ChevronRight, ChevronLeft, Receipt } from "lucide-react";
 import { expensesForMonth } from "@/lib/queries";
 import { formatIQD } from "@/lib/format";
-import { formatDateAr, formatPeriodAr, todayISO, currentPeriod } from "@/lib/dates";
-import { EXPENSE_CATEGORIES, EXPENSE_CATEGORY_LABELS } from "@/lib/strings";
-import { cn } from "@/lib/utils";
+import { formatDateAr, formatPeriodAr, todayISO, currentPeriod, shiftPeriod } from "@/lib/dates";
+import {
+  EXPENSE_CATEGORIES,
+  EXPENSE_CATEGORY_LABELS,
+  expenseCategoryTotal,
+} from "@/lib/strings";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import {
@@ -15,16 +18,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { SubmitButton } from "@/components/forms/submit-button";
 import { ExpenseForm } from "./expense-form";
-import { deleteExpenseAction } from "@/lib/actions/expenses";
-
-/** "YYYY-MM" + عدد الأشهر -> "YYYY-MM" (محسوب محلياً، بلا تعديل ملفات مشتركة). */
-function shiftPeriod(period: string, delta: number): string {
-  const [y, m] = period.split("-").map(Number);
-  const d = new Date(y, m - 1 + delta, 1);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-}
+import { DeleteExpenseButton } from "./delete-expense-button";
 
 export default async function ExpensesPage({
   searchParams,
@@ -43,16 +38,16 @@ export default async function ExpensesPage({
   return (
     <div className="space-y-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold">المصروفات</h1>
+        <h1 className="flex items-center gap-2 text-2xl font-bold"><Receipt className="text-muted-foreground size-6 shrink-0" />المصروفات</h1>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="h-11" render={<Link href={`?period=${prev}`} />}>
+          <Button variant="outline" size="sm" className="h-11" nativeButton={false} render={<Link href={`?period=${prev}`} />}>
             <ChevronRight className="size-4" />
             الشهر السابق
           </Button>
           <span className="min-w-28 text-center text-sm font-semibold">
             {formatPeriodAr(period)}
           </span>
-          <Button variant="outline" size="sm" className="h-11" render={<Link href={`?period=${next}`} />}>
+          <Button variant="outline" size="sm" className="h-11" nativeButton={false} render={<Link href={`?period=${next}`} />}>
             الشهر التالي
             <ChevronLeft className="size-4" />
           </Button>
@@ -60,7 +55,10 @@ export default async function ExpensesPage({
       </header>
 
       {/* بطاقات إجمالي كل فئة + الإجمالي العام */}
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+      <section
+        data-tour="expenses-totals"
+        className="animate-stagger grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4"
+      >
         {EXPENSE_CATEGORIES.map((c) => (
           <Card key={c.key} size="sm">
             <CardHeader>
@@ -68,7 +66,7 @@ export default async function ExpensesPage({
             </CardHeader>
             <CardContent>
               <p className="money text-lg font-bold sm:text-xl">
-                {formatIQD(totals.get(c.key) ?? 0)}
+                {formatIQD(expenseCategoryTotal(totals, c))}
               </p>
             </CardContent>
           </Card>
@@ -83,7 +81,9 @@ export default async function ExpensesPage({
         </Card>
       </section>
 
-      <ExpenseForm today={todayISO()} />
+      <div data-tour="expenses-form">
+        <ExpenseForm today={todayISO()} />
+      </div>
 
       {/* جدول المصروفات */}
       <Card>
@@ -114,21 +114,15 @@ export default async function ExpensesPage({
                     </TableCell>
                     <TableCell className="money text-end">{formatIQD(r.amount)}</TableCell>
                     <TableCell className="text-muted-foreground max-w-48 truncate whitespace-normal">
-                      {r.note || "—"}
+                      {r.note}
                     </TableCell>
                     <TableCell className="text-end">
-                      <form action={deleteExpenseAction}>
-                        <input type="hidden" name="id" value={r.id} />
-                        <SubmitButton
-                          variant="ghost"
-                          size="icon"
-                          pendingText="…"
-                          aria-label="حذف المصروف"
-                          className={cn("size-11 text-destructive hover:bg-destructive/10")}
-                        >
-                          <Trash2 className="size-4" />
-                        </SubmitButton>
-                      </form>
+                      <DeleteExpenseButton
+                        id={r.id}
+                        amount={r.amount}
+                        category={EXPENSE_CATEGORY_LABELS[r.category] ?? r.category}
+                        expenseDate={r.expenseDate}
+                      />
                     </TableCell>
                   </TableRow>
                 ))}

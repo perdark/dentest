@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowRight, AlertTriangle } from "lucide-react";
+import { ArrowRight, StickyNote } from "lucide-react";
 import { caseWithDetails, caseRaw, paymentsForCase } from "@/lib/queries";
 import { formatIQD } from "@/lib/format";
 import { formatDateAr, todayISO } from "@/lib/dates";
 import { PAYMENT_KIND_LABELS, CASE_STATUS_LABELS } from "@/lib/strings";
 import { Badge } from "@/components/ui/badge";
+import { MedicalBadge } from "@/components/ui/medical-badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
@@ -60,29 +61,23 @@ export default async function OrthoCasePage({
         <Badge variant={STATUS_VARIANT[detail.status] ?? "secondary"}>
           {CASE_STATUS_LABELS[detail.status] ?? detail.status}
         </Badge>
+        <MedicalBadge flags={detail.patientMedicalFlags} />
         {raw.hasComplaint ? (
-          <Badge variant="destructive" className="gap-1">
-            <AlertTriangle className="size-3" />
-            شكوى مسجّلة
+          <Badge variant="secondary" className="gap-1">
+            <StickyNote className="size-3" />
+            ملاحظة مسجّلة
           </Badge>
         ) : null}
       </div>
 
-      {/* Money summary */}
+      {/* Money summary — مقدمة ومدفوع فقط: لا إجمالي متفق عليه في التقويم. [2026-08-19] */}
       <Card>
         <CardHeader>
           <CardTitle>الحساب</CardTitle>
         </CardHeader>
-        <CardContent className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
-          <Figure label="الإجمالي" value={formatIQD(detail.totalPrice)} />
-          <Figure label="الخصم" value={formatIQD(raw.discount)} />
-          <Figure label="المقدمة" value={downPayment ? formatIQD(downPayment.amount) : "—"} />
+        <CardContent className="grid grid-cols-2 gap-4">
+          <Figure label="المقدمة" value={formatIQD(downPayment?.amount ?? 0)} />
           <Figure label="المدفوع" value={formatIQD(detail.paid)} />
-          <Figure
-            label="المتبقي"
-            value={formatIQD(detail.remaining)}
-            highlight={detail.remaining > 0}
-          />
         </CardContent>
       </Card>
 
@@ -90,7 +85,7 @@ export default async function OrthoCasePage({
         {/* Appointment + complaint (dispute protection) */}
         <Card>
           <CardHeader>
-            <CardTitle>الموعد والشكوى</CardTitle>
+            <CardTitle>الموعد والملاحظات</CardTitle>
           </CardHeader>
           <CardContent>
             <OrthoMetaForm
@@ -105,13 +100,15 @@ export default async function OrthoCasePage({
         {/* Add a session payment */}
         <Card>
           <CardHeader>
-            <CardTitle>تسجيل دفعة جلسة</CardTitle>
+            <CardTitle>إضافة دفعة جلسة</CardTitle>
           </CardHeader>
           <CardContent>
+            {/* لا شرط «متبقٍ»: الجلسة تُسعَّر عند إضافتها ما دامت الحالة مفتوحة. */}
             <OrthoPaymentForm
               caseId={caseId}
               today={today}
-              canCollect={detail.status === "open" && detail.remaining > 0}
+              paidSoFar={detail.paid}
+              canCollect={detail.status === "open"}
             />
           </CardContent>
         </Card>
@@ -155,7 +152,7 @@ export default async function OrthoCasePage({
                       {formatIQD(p.amount)}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
-                      {p.note ?? "—"}
+                      {p.note}
                     </TableCell>
                     <TableCell className="text-end">
                       <VoidPaymentButton

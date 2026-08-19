@@ -8,7 +8,7 @@
  *   npm run pin:reset            → resets to 1234
  *   npm run pin:reset -- 4821    → resets to 4821
  *
- * Requires filesystem access to dentest.db, which means physical access to the
+ * Requires filesystem access to zuha.db, which means physical access to the
  * machine — that is the intended security boundary for an on-prem system.
  */
 import { eq } from "drizzle-orm";

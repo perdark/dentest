@@ -40,8 +40,8 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# Dentest local data (never commit clinic data or backups)
-dentest.db
+# Zuha local data (never commit clinic data or backups)
+zuha.db
 *.db
 *.db-shm
 *.db-wal
@@ -51,3 +51,11 @@ dentest.db
 verify.db
 verify.db-shm
 verify.db-wal
+
+# Playwright (e2e.db itself is already covered by *.db above)
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/e2e/.auth/
+/e2e-backups/

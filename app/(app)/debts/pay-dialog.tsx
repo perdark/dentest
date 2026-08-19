@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useCallback, useState } from "react";
 import {
   Dialog,
   DialogClose,
@@ -12,7 +12,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { formatIQD } from "@/lib/format";
+import { useActionToast } from "@/components/forms/use-action-toast";
+import { MoneySummary } from "@/components/forms/money-summary";
+import { formatIQD, parseAmount } from "@/lib/format";
 import { recordDebtPayment, type PayState } from "@/lib/actions/debts";
 
 export function PayDialog({
@@ -27,29 +29,32 @@ export function PayDialog({
   today: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [amount, setAmount] = useState("");
   const [state, formAction, pending] = useActionState<PayState, FormData>(
     recordDebtPayment,
     {},
   );
 
-  // أغلق الحوار بعد نجاح التسجيل.
-  useEffect(() => {
-    if (state.ok) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- useActionState resolves after the submit event.
+  // أغلق الحوار وأكّد الإضافة بعد نجاحها.
+  useActionToast(
+    state,
+    "تمت إضافة الدفعة بنجاح",
+    useCallback(() => {
       setOpen(false);
-    }
-  }, [state]);
+      setAmount("");
+    }, []),
+  );
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger
         render={<Button variant="outline" className="h-11 whitespace-nowrap" />}
       >
-        تسجيل دفعة
+        إضافة دفعة
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>تسجيل دفعة — {patientName}</DialogTitle>
+          <DialogTitle>إضافة دفعة — {patientName}</DialogTitle>
         </DialogHeader>
 
         <p className="text-muted-foreground text-sm">
@@ -72,7 +77,20 @@ export function PayDialog({
               placeholder="مثال: 50,000"
               className="h-11"
               autoFocus
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
             />
+            {parseAmount(amount) !== 0 ? (
+              <MoneySummary
+                figures={[
+                  {
+                    label: "المتبقي بعد هذه الدفعة",
+                    amount: remaining - parseAmount(amount),
+                    emphasis: true,
+                  },
+                ]}
+              />
+            ) : null}
           </div>
 
           <div className="space-y-2">

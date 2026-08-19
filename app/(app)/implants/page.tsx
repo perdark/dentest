@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Search } from "lucide-react";
+import { Search, IdCard } from "lucide-react";
 import { implantIndex, listDoctors } from "@/lib/queries";
 import { formatIQD } from "@/lib/format";
 import { formatDateAr, todayISO } from "@/lib/dates";
@@ -7,6 +7,7 @@ import { CASE_STATUS_LABELS } from "@/lib/strings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { EmptyValue } from "@/components/ui/empty-value";
 import {
   Table,
   TableBody,
@@ -17,7 +18,10 @@ import {
 } from "@/components/ui/table";
 import { NewCard } from "./new-card";
 
-const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+const STATUS_VARIANT: Record<
+  string,
+  "default" | "secondary" | "destructive" | "outline"
+> = {
   open: "default",
   completed: "secondary",
   cancelled: "destructive",
@@ -31,26 +35,35 @@ export default async function ImplantsPage({
   const sp = await searchParams;
   const q = sp.q?.trim() ?? "";
   const rows = implantIndex(q);
-  const doctors = listDoctors({ activeOnly: true }).map((d) => ({ id: d.id, name: d.name }));
+  const doctors = listDoctors({ activeOnly: true }).map((d) => ({
+    id: d.id,
+    name: d.name,
+  }));
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">سجل الزراعة</h1>
+          <h1 className="flex items-center gap-2 text-2xl font-bold"><IdCard className="text-muted-foreground size-6 shrink-0" />سجل الزراعة</h1>
           <p className="text-muted-foreground mt-1 text-sm">
             فهرس بطاقات الزراعة مرتّبة حسب رقم الكارت
           </p>
         </div>
-        <NewCard doctors={doctors} today={todayISO()} />
+        <div data-tour="implants-add">
+          <NewCard doctors={doctors} today={todayISO()} />
+        </div>
       </div>
 
-      <form method="get" className="flex items-center gap-2">
+      <form
+        method="get"
+        data-tour="implants-search"
+        className="flex items-center gap-2"
+      >
         <Input
           name="q"
           defaultValue={q}
           inputMode="search"
-          placeholder="ابحث بالاسم أو رقم الكارت أو رقم الحساب"
+          placeholder="ابحث بالاسم أو رقم الكارت"
           className="h-11 max-w-xs"
         />
         <Button type="submit" variant="outline" className="h-11">
@@ -61,15 +74,19 @@ export default async function ImplantsPage({
 
       {rows.length === 0 ? (
         <div className="text-muted-foreground rounded-xl border border-dashed p-8 text-center text-sm">
-          {q ? "لا توجد بطاقات مطابقة لبحثك." : "لا توجد بطاقات زراعة بعد. أنشئ بطاقة جديدة للبدء."}
+          {q
+            ? "لا توجد بطاقات مطابقة لبحثك."
+            : "لا توجد بطاقات زراعة بعد. أنشئ بطاقة جديدة للبدء."}
         </div>
       ) : (
-        <div className="rounded-xl ring-1 ring-foreground/10">
+        <div
+          data-tour="implants-list"
+          className="rounded-xl ring-1 ring-foreground/10"
+        >
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>رقم الكارت</TableHead>
-                <TableHead>رقم الحساب</TableHead>
                 <TableHead>المريض</TableHead>
                 <TableHead>الطبيب</TableHead>
                 <TableHead className="text-start">الإجمالي</TableHead>
@@ -83,9 +100,8 @@ export default async function ImplantsPage({
               {rows.map((r) => (
                 <TableRow key={r.id}>
                   <TableCell className="font-semibold tabular-nums">
-                    {r.implantCardNo ?? "—"}
+                    {r.implantCardNo ?? <EmptyValue>بلا رقم</EmptyValue>}
                   </TableCell>
-                  <TableCell className="tabular-nums">{r.accountSeqNo ?? "—"}</TableCell>
                   <TableCell>
                     <Link
                       href={`/implants/${r.id}`}
@@ -109,7 +125,9 @@ export default async function ImplantsPage({
                       {CASE_STATUS_LABELS[r.status] ?? r.status}
                     </Badge>
                   </TableCell>
-                  <TableCell className="whitespace-nowrap">{formatDateAr(r.openedDate)}</TableCell>
+                  <TableCell className="whitespace-nowrap">
+                    {formatDateAr(r.openedDate)}
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>

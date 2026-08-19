@@ -8,7 +8,13 @@ import {
   setAppointmentStatus,
   deleteAppointment,
 } from "@/lib/mutations";
-import { todayISO, isValidISODate } from "@/lib/dates";
+import { appointmentById } from "@/lib/queries";
+import {
+  todayISO,
+  isValidISODate,
+  shiftISOByDays,
+  shiftISOByMonths,
+} from "@/lib/dates";
 import { requireAuth } from "@/lib/auth";
 
 export type ApptState = { ok?: boolean; error?: string };
@@ -96,6 +102,55 @@ export async function removeAppointment(
   if (!deleteAppointment(parsed.data.id)) {
     return { error: "لم يتم العثور على الموعد" };
   }
+
+  revalidateAppointments();
+  return { ok: true };
+}
+
+// ── إعادة حجز ────────────────────────────────────────────────────────────────
+/**
+ * «إعادة حجز» يفتح موعداً جديداً بعد المدة المختارة ولا يمسّ الموعد الأصلي:
+ * سجل المواعيد سِجل، والمريض الذي حضر اليوم يبقى مسجّلاً أنه حضر. المريض
+ * والطبيب يُنسخان من الموعد القديم حتى لا يُعاد إدخالهما. [2026-08-19]
+ */
+const REBOOK_OFFSETS = {
+  week: { days: 7 },
+  month: { months: 1 },
+  two_months: { months: 2 },
+  three_months: { months: 3 },
+} as const;
+
+export type RebookOffset = keyof typeof REBOOK_OFFSETS;
+
+const rebookSchema = z.object({
+  id: z.coerce.number().int().positive(),
+  offset: z.enum(["week", "month", "two_months", "three_months"]),
+});
+
+export async function rebookAppointment(
+  _prev: ApptState,
+  formData: FormData,
+): Promise<ApptState> {
+  await requireAuth();
+  const parsed = rebookSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: "تعذّرت إعادة الحجز" };
+
+  const existing = appointmentById(parsed.data.id);
+  if (!existing) return { error: "لم يتم العثور على الموعد" };
+
+  // القياس من تاريخ الموعد نفسه لا من اليوم: «بعد شهر» تعني بعد شهر من الزيارة.
+  const spec = REBOOK_OFFSETS[parsed.data.offset];
+  const nextDate =
+    "days" in spec
+      ? shiftISOByDays(existing.apptDate, spec.days)
+      : shiftISOByMonths(existing.apptDate, spec.months);
+
+  createAppointment({
+    patientId: existing.patientId,
+    doctorId: existing.doctorId,
+    apptDate: nextDate,
+    note: existing.note,
+  });
 
   revalidateAppointments();
   return { ok: true };

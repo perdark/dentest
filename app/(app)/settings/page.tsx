@@ -1,3 +1,4 @@
+import { Settings } from "lucide-react";
 import type { Metadata } from "next";
 import { getSettings } from "@/lib/server-utils";
 import { listDoctors } from "@/lib/queries";
@@ -24,9 +25,9 @@ export default async function SettingsPage() {
   };
 
   return (
-    <div className="mx-auto w-full max-w-2xl space-y-6">
+    <div data-tour="settings-page" className="mx-auto w-full max-w-2xl space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">الإعدادات</h1>
+        <h1 className="flex items-center gap-2 text-2xl font-bold"><Settings className="text-muted-foreground size-6 shrink-0" />الإعدادات</h1>
         <p className="text-muted-foreground mt-1 text-sm">
           إعدادات العيادة والحساب ونِسَب الأطباء ورمز الدخول والنسخ الاحتياطي.
         </p>

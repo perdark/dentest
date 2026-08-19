@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useRef, useState } from "react";
+import { useActionState, useCallback, useRef, useState } from "react";
 import { Pencil, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,7 +16,9 @@ import {
 } from "@/components/ui/dialog";
 import { NativeSelect } from "@/components/forms/native-select";
 import { SubmitButton } from "@/components/forms/submit-button";
+import { useActionToast } from "@/components/forms/use-action-toast";
 import { formatIQD, parseAmount } from "@/lib/format";
+import { MoneySummary } from "@/components/forms/money-summary";
 import { CASE_STATUS_LABELS } from "@/lib/strings";
 import {
   updateImplantCard,
@@ -26,13 +28,14 @@ import {
 
 type CardData = {
   caseId: number;
-  device: string | null;
   address: string | null;
   labCost: number;
   listPrice: number;
   discount: number;
   status: "open" | "completed" | "cancelled";
   notes: string | null;
+  /** المدفوع حتى الآن — يُقرأ للسطر الحيّ فقط، والحساب المعتمد على الخادم. */
+  paid: number;
 };
 
 export function CardActions({
@@ -45,7 +48,7 @@ export function CardActions({
   return (
     <div className="flex flex-wrap gap-2">
       <EditDialog card={card} />
-      <SessionDialog caseId={card.caseId} today={today} />
+      <SessionDialog caseId={card.caseId} paid={card.paid} today={today} />
     </div>
   );
 }
@@ -62,12 +65,11 @@ function EditDialog({ card }: { card: CardData }) {
   const [discount, setDiscount] = useState(String(card.discount));
   const previewTotal = Math.max(0, parseAmount(price) - parseAmount(discount));
 
-  useEffect(() => {
-    if (state.ok) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- useActionState resolves after the submit event.
-      setOpen(false);
-    }
-  }, [state]);
+  useActionToast(
+    state,
+    "تم حفظ تعديلات البطاقة",
+    useCallback(() => setOpen(false), []),
+  );
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -91,16 +93,6 @@ function EditDialog({ card }: { card: CardData }) {
           <input type="hidden" name="caseId" value={card.caseId} />
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div className="space-y-1.5 sm:col-span-2">
-              <Label htmlFor="ed-device">الجهاز</Label>
-              <Input
-                id="ed-device"
-                name="device"
-                defaultValue={card.device ?? ""}
-                className="h-11"
-              />
-            </div>
-
             <div className="space-y-1.5 sm:col-span-2">
               <Label htmlFor="ed-address">العنوان</Label>
               <Input
@@ -143,6 +135,17 @@ function EditDialog({ card }: { card: CardData }) {
                 {formatIQD(previewTotal)}
               </span>
             </div>
+
+            <MoneySummary
+              figures={[
+                { label: "المدفوع", amount: card.paid },
+                {
+                  label: "المتبقي بعد التعديل",
+                  amount: previewTotal - card.paid,
+                  emphasis: true,
+                },
+              ]}
+            />
 
             <div className="space-y-1.5">
               <Label htmlFor="ed-labCost">كلفة المختبر (د.ع)</Label>
@@ -191,21 +194,32 @@ function EditDialog({ card }: { card: CardData }) {
   );
 }
 
-function SessionDialog({ caseId, today }: { caseId: number; today: string }) {
+function SessionDialog({
+  caseId,
+  paid,
+  today,
+}: {
+  caseId: number;
+  paid: number;
+  today: string;
+}) {
   const [open, setOpen] = useState(false);
+  const [amount, setAmount] = useState("");
   const formRef = useRef<HTMLFormElement>(null);
   const [state, formAction] = useActionState<ImplantFormState, FormData>(
     addImplantSession,
     {},
   );
 
-  useEffect(() => {
-    if (state.ok) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- useActionState resolves after the submit event.
+  useActionToast(
+    state,
+    "تم حفظ الجلسة بنجاح",
+    useCallback(() => {
       setOpen(false);
       formRef.current?.reset();
-    }
-  }, [state]);
+      setAmount("");
+    }, []),
+  );
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -237,7 +251,20 @@ function SessionDialog({ caseId, today }: { caseId: number; today: string }) {
               placeholder="0"
               required
               className="h-11"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
             />
+            {parseAmount(amount) !== 0 ? (
+              <MoneySummary
+                figures={[
+                  {
+                    label: "مجموع المدفوع بعد هذه الجلسة",
+                    amount: paid + parseAmount(amount),
+                    emphasis: true,
+                  },
+                ]}
+              />
+            ) : null}
           </div>
 
           <div className="space-y-1.5">

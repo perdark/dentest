@@ -6,8 +6,8 @@ import path from "node:path";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { eq, sql } from "drizzle-orm";
 
-const testDir = mkdtempSync(path.join(tmpdir(), "dentest-audit-"));
-process.env.DENTEST_DB = path.join(testDir, "audit.db");
+const testDir = mkdtempSync(path.join(tmpdir(), "zuha-audit-"));
+process.env.ZUHA_DB = path.join(testDir, "audit.db");
 
 let dbClient: typeof import("@/lib/db/client");
 let schema: typeof import("@/lib/db/schema");

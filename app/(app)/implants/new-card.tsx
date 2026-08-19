@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useRef, useState } from "react";
+import { useActionState, useCallback, useRef, useState } from "react";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,6 +15,9 @@ import {
 } from "@/components/ui/dialog";
 import { NativeSelect } from "@/components/forms/native-select";
 import { SubmitButton } from "@/components/forms/submit-button";
+import { useActionToast } from "@/components/forms/use-action-toast";
+import { MoneySummary } from "@/components/forms/money-summary";
+import { parseAmount } from "@/lib/format";
 import { createImplantCard, type ImplantFormState } from "@/lib/actions/implants";
 
 export function NewCard({
@@ -25,19 +28,31 @@ export function NewCard({
   today: string;
 }) {
   const [open, setOpen] = useState(false);
+  // معاينة فقط — الإجمالي النهائي يُحتسب على الخادم. [A3]
+  const [price, setPrice] = useState("");
+  const [discount, setDiscount] = useState("");
+  const [downPayment, setDownPayment] = useState("");
+  const net = Math.max(0, parseAmount(price) - parseAmount(discount));
+  const remaining = net - parseAmount(downPayment);
   const formRef = useRef<HTMLFormElement>(null);
   const [state, formAction] = useActionState<ImplantFormState, FormData>(
     createImplantCard,
     {},
   );
 
-  useEffect(() => {
-    if (state.ok) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- useActionState resolves after the submit event.
+  useActionToast(
+    state,
+    "تم فتح بطاقة الزراعة بنجاح",
+    useCallback(() => {
       setOpen(false);
       formRef.current?.reset();
-    }
-  }, [state]);
+      // الحقول المتحكَّم بها لا يمسّها form.reset() — تُصفَّر يدوياً وإلا فُتحت
+      // البطاقة التالية بأرقام سابقتها.
+      setPrice("");
+      setDiscount("");
+      setDownPayment("");
+    }, []),
+  );
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -90,11 +105,6 @@ export function NewCard({
               <Input id="nc-address" name="address" className="h-11" />
             </div>
 
-            <div className="space-y-1.5 sm:col-span-2">
-              <Label htmlFor="nc-device">الجهاز</Label>
-              <Input id="nc-device" name="device" className="h-11" />
-            </div>
-
             <div className="space-y-1.5">
               <Label htmlFor="nc-price">السعر الكلي (د.ع)</Label>
               <Input
@@ -104,6 +114,8 @@ export function NewCard({
                 placeholder="0"
                 required
                 className="h-11"
+                value={price}
+                onChange={(e) => setPrice(e.target.value)}
               />
             </div>
 
@@ -115,6 +127,8 @@ export function NewCard({
                 inputMode="numeric"
                 placeholder="0"
                 className="h-11"
+                value={discount}
+                onChange={(e) => setDiscount(e.target.value)}
               />
             </div>
 
@@ -126,8 +140,19 @@ export function NewCard({
                 inputMode="numeric"
                 placeholder="0"
                 className="h-11"
+                value={downPayment}
+                onChange={(e) => setDownPayment(e.target.value)}
               />
             </div>
+
+            {price !== "" ? (
+              <MoneySummary
+                figures={[
+                  { label: "الصافي", amount: net },
+                  { label: "المتبقي", amount: remaining, emphasis: true },
+                ]}
+              />
+            ) : null}
 
             <div className="space-y-1.5">
               <Label htmlFor="nc-date">التاريخ</Label>

@@ -12,8 +12,8 @@ import {
   rawDoctorPayout,
 } from "@/lib/settlement-math";
 
-const testDir = mkdtempSync(path.join(tmpdir(), "dentest-settlement-"));
-process.env.DENTEST_DB = path.join(testDir, "settlement.db");
+const testDir = mkdtempSync(path.join(tmpdir(), "zuha-settlement-"));
+process.env.ZUHA_DB = path.join(testDir, "settlement.db");
 
 let dbClient: typeof import("@/lib/db/client");
 let schema: typeof import("@/lib/db/schema");

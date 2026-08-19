@@ -14,7 +14,7 @@ import { seed } from "./seed";
 
 function migrationsFolder(): string {
   // Packaged: Electron points this at the bundled copy. Dev: ./drizzle.
-  const configured = process.env.DENTEST_MIGRATIONS_DIR;
+  const configured = process.env.ZUHA_MIGRATIONS_DIR;
   if (configured && fs.existsSync(configured)) return configured;
   return path.join(process.cwd(), "drizzle");
 }

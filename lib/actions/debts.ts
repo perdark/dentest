@@ -9,7 +9,7 @@ import { requireAuth } from "@/lib/auth";
 
 export type PayState = { ok?: boolean; error?: string };
 
-// ── تسجيل دفعة لدين قائم (جلسة) ───────────────────────────────────────────────
+// ── إضافة دفعة لدين قائم (جلسة) ───────────────────────────────────────────────
 const schema = z.object({
   caseId: z.coerce.number().int().positive(),
   amount: z.string().trim().min(1, "أدخل المبلغ"),

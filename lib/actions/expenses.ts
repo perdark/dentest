@@ -60,13 +60,17 @@ export async function addExpenseAction(
 // ── حذف مصروف ─────────────────────────────────────────────────────────────────
 const deleteSchema = z.object({ id: z.coerce.number().int().positive() });
 
-export async function deleteExpenseAction(formData: FormData): Promise<void> {
+export async function deleteExpenseAction(
+  _prev: ExpenseFormState,
+  formData: FormData,
+): Promise<ExpenseFormState> {
   await requireAuth();
   const parsed = deleteSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return;
+  if (!parsed.success) return { error: "تعذّر تحديد المصروف المطلوب حذفه" };
 
   deleteExpense(parsed.data.id);
 
   revalidatePath("/expenses");
   revalidatePath("/dashboard");
+  return { ok: true };
 }

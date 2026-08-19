@@ -1,4 +1,4 @@
-# Dentest — Clinic Records & Money System (decoded brief)
+# Zuha — Clinic Records & Money System (decoded brief)
 
 > Source: 2 handwritten "السجلات" spec photos + 4 walkthrough videos + 9-min audio note
 > (`عراقي مول.m4a`). Iraqi dental clinic, amounts in **Iraqi Dinar (millions)**.
@@ -118,4 +118,55 @@ sensible defaults + a visible "unconfirmed" flag, so plugging the real values la
   defaults (e.g. % applied AFTER lab deduction) clearly marked "to confirm with clinic." When the
   clinic answers, you edit settings — you don't touch code.
 - The ONE concrete artifact worth chasing early: **the price list** (they said they can send it).
-</content>
+
+## الأشعة — X-rays (added 2026-08-15, after the brief)
+Not in the clinic's "treatment types are fixed" list above — this was requested later, so it is
+recorded here rather than left to be discovered in the code.
+
+- **Four types**, seeded as treatment types with placeholder prices: بانوراما (OPG), ذروية
+  (periapical), ثلاثية الأبعاد (CBCT), سيفالومترية (cephalometric).
+- **Billed like any other treatment**: an X-ray is a case with a price and payments, so it inherits
+  the audit log, the closed-period rule, the daily ledger, and the debts call-list. Usually paid in
+  full at the desk; an unpaid film shows up in «المستحقات» like any balance.
+- **The money is the CLINIC's, not the doctor's [D9].** X-ray collections never enter a doctor's
+  commissionable base, work-done total, or payout. They are reported as a separate clinic income
+  line and added whole into clinic net. Structurally enforced: the settlement's per-doctor sums ask
+  for the three doctor buckets (implant/ortho/normal) by name, and X-rays live in a fourth bucket.
+- The doctor recorded on a film is **for follow-up only** — the screen says so.
+- **Still to confirm with the owner:** that X-ray income really is clinic-only (see
+  `docs/OWNER-NOTES.md`), and the four real prices.
+
+---
+
+## ملحق: دفعة تعديلات العميل 2026-08-19 (addendum)
+
+Confirmed with the clinic rep on 2026-08-19 and built the same day. Where this addendum
+contradicts anything above, **the addendum wins** — the sections above are the original decode and
+are kept for history. Full spec + build log: `docs/BATCH-2026-08-19.md`.
+
+1. **«قائمة الأسعار» removed entirely.** The clinic's price varies per patient, so there are no
+   default prices anywhere — including the four X-ray prices the section above still calls
+   "placeholder prices". Every case is priced by hand when it is opened. The `price_list` table
+   stays in the schema, dormant. *(This supersedes the "ONE concrete artifact worth chasing: the
+   price list" line above — there is nothing to chase.)*
+2. **Patient balances are «الديون» again**, not «المستحقات». The X-ray section above still says an
+   unpaid film shows up in «المستحقات» — read that as «الديون». «مستحقات» now means **doctor** dues
+   only.
+3. **«تسجيل» is gone from all visible copy** (reads as sign-up): إضافة / حفظ / حجز instead.
+4. **Ortho has no agreed total.** المقدمة plus a per-session amount; no الإجمالي and no المتبقي
+   anywhere in ortho, and ortho never appears in «الديون».
+5. **Chronic conditions on the patient file** (قلب، سكري، ضغط، حساسية، سيولة، ربو، حمل، كلى، كبد)
+   with a warning badge wherever a case is opened, plus server-side patient filters.
+6. **Daily-entry treatment is free text** with saved suggestions; a name matching a non-normal
+   bucket is refused, which is what keeps D9 intact.
+7. **Appointments gained a month calendar** (Saturday-first, ar-IQ), doctor/status filters, and
+   «إعادة حجز» after a visit is marked حضر.
+8. **New «الأطباء» section** with per-doctor lab dues — each doctor has his own lab, two branches
+   (ثابت / متحرك). **This money is tracked only: never a payout, never clinic cash.** See
+   `docs/OWNER-NOTES.md` §9 for the decision and the switch that would change it.
+9. **Live arithmetic in every money form** — the clerk sees what a discount or part payment leaves
+   owing before saving.
+
+**Still unconfirmed after this batch** (unchanged): commission percentages, the lab/% formula, the
+5M cash rule, staff salaries, and whether X-ray income really is clinic-only. All live in Settings
+and are recorded in `docs/OWNER-NOTES.md`.

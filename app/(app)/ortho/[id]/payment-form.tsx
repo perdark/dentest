@@ -1,34 +1,46 @@
 "use client";
 
-import { useActionState, useEffect, useRef } from "react";
+import { useActionState, useCallback, useRef, useState } from "react";
 import { addOrthoPayment, type OrthoFormState } from "@/lib/actions/ortho";
 import { SubmitButton } from "@/components/forms/submit-button";
+import { useActionToast } from "@/components/forms/use-action-toast";
+import { MoneySummary } from "@/components/forms/money-summary";
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { parseAmount } from "@/lib/format";
 
 export function OrthoPaymentForm({
   caseId,
   today,
+  paidSoFar,
   canCollect,
 }: {
   caseId: number;
   today: string;
+  /** مجموع ما دفعته الحالة حتى الآن — للسطر الحيّ أسفل النموذج. */
+  paidSoFar: number;
   canCollect: boolean;
 }) {
   const formRef = useRef<HTMLFormElement>(null);
+  const [amount, setAmount] = useState("");
   const [state, formAction] = useActionState<OrthoFormState, FormData>(
     addOrthoPayment,
     {},
   );
 
-  useEffect(() => {
-    if (state.ok) formRef.current?.reset();
-  }, [state]);
+  useActionToast(
+    state,
+    "تمت إضافة الدفعة بنجاح",
+    useCallback(() => {
+      formRef.current?.reset();
+      setAmount("");
+    }, []),
+  );
 
   if (!canCollect) {
     return (
       <p className="text-muted-foreground py-4 text-center text-sm">
-        لا توجد دفعة جلسة قابلة للتسجيل لهذه الحالة.
+        لا يمكن إضافة دفعة جلسة لهذه الحالة.
       </p>
     );
   }
@@ -48,6 +60,18 @@ export function OrthoPaymentForm({
             className="h-11"
             placeholder="مثال: 100,000"
             aria-invalid={Boolean(state.error)}
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+          />
+          <MoneySummary
+            figures={[
+              { label: "المدفوع حتى الآن", amount: paidSoFar },
+              {
+                label: "بعد هذه الدفعة",
+                amount: paidSoFar + parseAmount(amount),
+                emphasis: true,
+              },
+            ]}
           />
         </Field>
 
@@ -73,10 +97,9 @@ export function OrthoPaymentForm({
         </Field>
 
         <FieldError>{state.error}</FieldError>
-        {state.ok ? <p className="text-sm text-emerald-700">تم تسجيل الدفعة.</p> : null}
       </FieldGroup>
 
-      <SubmitButton className="h-11 w-full">تسجيل الدفعة</SubmitButton>
+      <SubmitButton className="h-11 w-full">إضافة الدفعة</SubmitButton>
     </form>
   );
 }

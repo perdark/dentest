@@ -7,7 +7,7 @@ Node install and nothing is exposed to the network.
 ## Build
 
 ```bash
-npm run dist:win     # → dist/Dentest-<version>-win-x64.zip
+npm run dist:win     # → dist/Zuha-<version>-win-x64.zip
 npm run dist:linux   # → dist/linux-unpacked  (for testing on this machine)
 npm run app:start    # run the packaged bundle locally without installing
 ```
@@ -18,12 +18,12 @@ npm run app:start    # run the packaged bundle locally without installing
 
 **Not** beside the executable. Program Files is read-only for a normal user and is replaced
 wholesale on update, so a database written there would either fail to open or be destroyed by
-the next install. `electron/main.js` sets `DENTEST_DATA_DIR` to the per-user app-data folder:
+the next install. `electron/main.js` sets `ZUHA_DATA_DIR` to the per-user app-data folder:
 
 | OS | Path |
 |---|---|
-| Windows | `C:\Users\<user>\AppData\Roaming\dentest` |
-| Linux | `~/.config/dentest` |
+| Windows | `C:\Users\<user>\AppData\Roaming\zuha` |
+| Linux | `~/.config/zuha` |
 
 `lib/paths.ts` is the single place that resolves this. In development nothing is set, so
 everything stays in the project folder exactly as before.
@@ -69,7 +69,7 @@ a hard stop, not a code review.
 build-machine paths): window opens with the Arabic title and menu, login screen renders RTL in
 Cairo, the database is created and migrated in the user-data folder, zero module errors.
 
-**Verified structurally for Windows:** `Dentest.exe` and both copies of `better_sqlite3.node`
+**Verified structurally for Windows:** `Zuha.exe` and both copies of `better_sqlite3.node`
 are `PE32+ x86-64`; the archive contains all 1785 entries with zero files missing versus the
 staged bundle.
 
@@ -78,7 +78,7 @@ staged bundle.
 > path handling and SmartScreen — not the app logic, which is identical to what was verified.
 
 **No installer.** NSIS requires wine, which needs root to install. The deliverable is a ZIP:
-extract anywhere and run `Dentest.exe`. To produce a real installer later, run
+extract anywhere and run `Zuha.exe`. To produce a real installer later, run
 `npm run dist:win` on a Windows machine after setting the target back to `nsis` in
 `package.json` → `build.win.target`.
 
@@ -87,9 +87,9 @@ signing needs a paid certificate.
 
 ## First-launch checklist for the clinic laptop
 
-1. Extract the ZIP, run `Dentest.exe`, dismiss SmartScreen.
+1. Extract the ZIP, run `Zuha.exe`, dismiss SmartScreen.
 2. The login screen appears within a few seconds → the server and native module loaded.
 3. Log in with `1234`, then change the PIN in الإعدادات.
-4. Help menu → «أين تُحفظ بيانات العيادة؟» → confirm the folder opens and contains `dentest.db`.
+4. Help menu → «أين تُحفظ بيانات العيادة؟» → confirm the folder opens and contains `zuha.db`.
 5. Enter the real price list and the confirmed doctor percentages.
 6. Copy the data folder to a USB stick and confirm it opens — before the clinic relies on it.

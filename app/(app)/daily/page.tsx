@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, CalendarDays } from "lucide-react";
 import {
   collectableCaseCount,
   dailyLedger,
@@ -9,13 +9,13 @@ import {
 } from "@/lib/queries";
 import { todayISO, isValidISODate, formatDateAr } from "@/lib/dates";
 import { formatIQD } from "@/lib/format";
-import { PAYMENT_KIND_LABELS } from "@/lib/strings";
+import { medicalFlagsMarker, PAYMENT_KIND_LABELS, XRAY_BUCKET } from "@/lib/strings";
 import { cn } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
+import { DayPicker } from "@/components/forms/day-picker";
 import { VoidPaymentButton } from "@/components/forms/void-payment-button";
 import { EntryDialog } from "./entry-dialog";
 
@@ -45,11 +45,18 @@ export default async function DailyPage({
 
   const rows = dailyLedger(date);
   const doctors = listDoctors({ activeOnly: true });
-  const treatments = listTreatmentTypes().filter((t) => !t.isImplant && !t.isOrtho);
+  // الأشعة لها سجلها الخاص، ودخلها للعيادة لا للطبيب — فلا تُفتح من هنا. [D9]
+  const treatments = listTreatmentTypes().filter(
+    (t) => !t.isImplant && !t.isOrtho && t.settlementBucket !== XRAY_BUCKET,
+  );
   // Capped list — the dialog searches the server for anything beyond it. [D3]
   const openCases = openCasesBrief().map((c) => ({
     id: c.id,
-    label: `${c.patientName} · ${c.treatment} · متبقٍ ${formatIQD(c.remaining)}`,
+    // نفس صيغة نتائج البحث في searchCollectableCases — القائمتان تُقرآن كواحدة.
+    label:
+      `${c.patientName} · ${c.treatment} · متبقٍ ${formatIQD(c.remaining)}` +
+      medicalFlagsMarker(c.patientMedicalFlags),
+    remaining: c.remaining,
   }));
   const totalCollectable = collectableCaseCount();
 
@@ -75,47 +82,40 @@ export default async function DailyPage({
     <div className="mx-auto flex max-w-3xl flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold">الدفتر اليومي</h1>
+          <h1 className="flex items-center gap-2 text-2xl font-bold"><CalendarDays className="text-muted-foreground size-6 shrink-0" />الدفتر اليومي</h1>
           <p className="text-muted-foreground text-sm">{formatDateAr(date)}</p>
         </div>
-        <EntryDialog
-          doctors={doctors}
-          treatments={treatments}
-          date={date}
-          openCases={openCases}
-          totalCollectable={totalCollectable}
-        />
+        <div data-tour="daily-add">
+          <EntryDialog
+            doctors={doctors}
+            treatments={treatments}
+            date={date}
+            openCases={openCases}
+            totalCollectable={totalCollectable}
+          />
+        </div>
       </div>
 
       {/* Day navigation */}
-      <div className="flex flex-wrap items-center gap-2">
+      <div data-tour="daily-nav" className="flex flex-wrap items-center gap-2">
         <Button
           variant="outline"
           className="h-11 gap-1"
           aria-label="اليوم السابق"
+          nativeButton={false}
           render={<Link href={`/daily?date=${prevDate}`} />}
         >
           <ChevronRight className="size-4" />
           السابق
         </Button>
 
-        <form action="/daily" className="flex items-center gap-2">
-          <Input
-            type="date"
-            name="date"
-            defaultValue={date}
-            aria-label="اختر التاريخ"
-            className="h-11 w-auto"
-          />
-          <Button type="submit" variant="outline" className="h-11">
-            عرض
-          </Button>
-        </form>
+        <DayPicker basePath="/daily" date={date} label="اختر يوم الدفتر" />
 
         <Button
           variant="outline"
           className="h-11 gap-1"
           aria-label="اليوم التالي"
+          nativeButton={false}
           render={<Link href={`/daily?date=${nextDate}`} />}
         >
           التالي
@@ -125,13 +125,13 @@ export default async function DailyPage({
 
       {/* Ledger */}
       {rows.length === 0 ? (
-        <Card>
+        <Card data-tour="daily-ledger">
           <CardContent className="text-muted-foreground py-12 text-center text-sm">
-            لا توجد قيود في هذا اليوم. اضغط «إضافة قيد» لتسجيل أول دفعة.
+            لا توجد قيود في هذا اليوم. اضغط «إضافة قيد» لإضافة أول دفعة.
           </CardContent>
         </Card>
       ) : (
-        <div className="flex flex-col gap-4">
+        <div data-tour="daily-ledger" className="animate-stagger flex flex-col gap-4">
           {[...groups.values()].map((g) => (
             <Card key={g.doctorId}>
               <CardHeader>
@@ -154,6 +154,12 @@ export default async function DailyPage({
                         <span className="text-muted-foreground text-xs">
                           بطاقة #{line.implantCardNo}
                         </span>
+                      ) : null}
+                      {/* الدفتر مجموعٌ بالطبيب، و«مجموع الطبيب» أسفله نقدُ اليوم
+                          لا أساس حصته. الأشعة وحدها تختلف بين الرقمين، فتُعلَّم
+                          هنا كي لا يُقرأ سطرها كعمل يُحتسب له. [D9] */}
+                      {line.bucket === XRAY_BUCKET ? (
+                        <span className="text-muted-foreground text-xs">دخل العيادة</span>
                       ) : null}
                     </div>
                     <div className="flex shrink-0 items-center gap-1">

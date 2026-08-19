@@ -2,7 +2,7 @@
  * Assemble exactly what ships to the clinic, into build/app/.
  *
  * `next build` with output:"standalone" copies more than it should — the source
- * recordings the brief was decoded from, the working dentest.db, docs, tests.
+ * recordings the brief was decoded from, the working zuha.db, docs, tests.
  * None of that belongs on the clinic's laptop, and the recordings alone are
  * 33 MB of patient-adjacent audio. So rather than delete afterwards (easy to
  * get wrong, and a miss means clinic data ships), this copies ONLY an explicit
@@ -19,8 +19,8 @@ const out = path.join(root, "build", "app");
 
 // Target platform for the native module. Defaults to the host so the packaged
 // app can be test-run locally; set to win32 when building the clinic installer.
-const targetPlatform = process.env.DENTEST_TARGET_PLATFORM || process.platform;
-const targetArch = process.env.DENTEST_TARGET_ARCH || "x64";
+const targetPlatform = process.env.ZUHA_TARGET_PLATFORM || process.platform;
+const targetArch = process.env.ZUHA_TARGET_ARCH || "x64";
 
 function must(p, what) {
   if (!fs.existsSync(p)) {

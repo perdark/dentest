@@ -201,3 +201,110 @@
   unicode-bidi: embed;
   display: inline-block;
 }
+
+/* ── Motion ──────────────────────────────────────────────────────────────────
+   The app is replacing paper. On paper you see your hand write the line; here
+   a record could appear, move, or vanish with nothing to mark that it happened,
+   and staff read that silence as "it didn't save". Motion is the receipt.
+
+   Transform and opacity only. The clinic runs this on one low-end laptop with
+   a full day's ledger on screen — anything that touches layout or paint drops
+   frames on exactly the table people look at most. Durations stay short enough
+   to feel like response, never like waiting. */
+
+@keyframes zuha-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes zuha-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes zuha-spotlight {
+  from {
+    opacity: 0;
+    transform: scale(1.04);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* One screen arriving. Keyed on the route, so every navigation replays it. */
+.animate-page {
+  animation: zuha-rise 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* A group whose items should land one after another instead of all at once —
+   summary cards, quick actions. Capped at eight: past that the last card waits
+   long enough to read as lag rather than sequence. */
+.animate-stagger > * {
+  animation: zuha-rise 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.animate-stagger > *:nth-child(1) {
+  animation-delay: 0ms;
+}
+.animate-stagger > *:nth-child(2) {
+  animation-delay: 40ms;
+}
+.animate-stagger > *:nth-child(3) {
+  animation-delay: 80ms;
+}
+.animate-stagger > *:nth-child(4) {
+  animation-delay: 120ms;
+}
+.animate-stagger > *:nth-child(5) {
+  animation-delay: 160ms;
+}
+.animate-stagger > *:nth-child(6) {
+  animation-delay: 200ms;
+}
+.animate-stagger > *:nth-child(7) {
+  animation-delay: 240ms;
+}
+.animate-stagger > *:nth-child(n + 8) {
+  animation-delay: 280ms;
+}
+
+.animate-pop {
+  animation: zuha-pop 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.animate-spotlight {
+  animation: zuha-spotlight 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Rows arrive with the page rather than each on its own timer: a fifty-line
+   ledger animating row by row is a slot machine, not a receipt. */
+.animate-rows tbody tr {
+  animation: zuha-rise 220ms ease-out both;
+}
+
+/* Someone who asked the system to stop moving gets a system that does not move.
+   Set on the whole document, not per component, so a rule added later cannot
+   quietly opt out of it. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

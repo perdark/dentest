@@ -58,6 +58,16 @@ export interface AuditEntry {
   after?: unknown;
   period?: string;
   note?: string;
+  /**
+   * Whether hitting a closed period should mark that month's settlement stale.
+   * Defaults to true and must stay true for anything that moves clinic money.
+   *
+   * The one exception is lab entries: that money is tracked outside the payout
+   * entirely, so a lab bill recorded late against a closed month changes no
+   * doctor's share and must not ask the clinic to re-open a settled month.
+   * The audit row is still written and still flagged `hitClosedPeriod`. [D4]
+   */
+  markStale?: boolean;
 }
 
 /**
@@ -79,7 +89,7 @@ export function recordEdit(e: AuditEntry): boolean {
       note: e.note ?? null,
     })
     .run();
-  if (closed && e.period) markPeriodStale(e.period);
+  if (closed && e.period && e.markStale !== false) markPeriodStale(e.period);
   return closed;
 }
 

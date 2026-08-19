@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, LayoutDashboard } from "lucide-react";
 import { dashboardStats } from "@/lib/queries";
 import { formatIQD, formatNumber } from "@/lib/format";
 import { formatPeriodAr } from "@/lib/dates";
@@ -76,17 +76,20 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="text-2xl font-bold">ملخص {formatPeriodAr(stats.period)}</h1>
+        <h1 className="flex items-center gap-2 text-2xl font-bold"><LayoutDashboard className="text-muted-foreground size-6 shrink-0" />ملخص {formatPeriodAr(stats.period)}</h1>
       </header>
 
-      <section className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+      <section
+        data-tour="stats"
+        className="animate-stagger grid grid-cols-2 gap-3 lg:grid-cols-3"
+      >
         <StatCard
           label="النقد المتوفر"
           value={formatIQD(stats.cash)}
           amber={stats.overReserve}
           note={
             stats.overReserve
-              ? `أعلى من حد الاحتياطي (${formatIQD(stats.reserveThreshold)} — غير مؤكد)`
+              ? `أعلى من حد الاحتياطي (${formatIQD(stats.reserveThreshold)})`
               : undefined
           }
         />
@@ -106,13 +109,14 @@ export default function DashboardPage() {
         />
       </section>
 
-      <Card>
+      <Card data-tour="doctor-collections">
         <CardHeader className="flex flex-row items-center justify-between gap-3">
           <CardTitle>تحصيل الأطباء هذا الشهر</CardTitle>
           <Button
             variant="link"
             size="sm"
             className="h-auto p-0"
+            nativeButton={false}
             render={<Link href="/settlement" />}
           >
             الحصيلة الشهرية
@@ -121,8 +125,10 @@ export default function DashboardPage() {
         </CardHeader>
         <CardContent>
           {/* الجدول مبنيّ على الأطباء لا على الدفعات، فالصفوف موجودة دائماً —
-              الحالة الفارغة الحقيقية هي ألّا يوجد تحصيل. [D7] */}
-          {stats.perDoctorMonth.every((d) => d.collected === 0) ? (
+              الحالة الفارغة الحقيقية هي ألّا يوجد تحصيل. [D7]
+              دخل الأشعة سطر مستقل: هو من تحصيل الشهر لكنه للعيادة، فلا يُضاف
+              إلى أي طبيب. [D9] */}
+          {stats.perDoctorMonth.every((d) => d.collected === 0) && stats.monthXray === 0 ? (
             <p className="text-muted-foreground py-4 text-sm">
               لا يوجد تحصيل لهذا الشهر بعد.
             </p>
@@ -143,16 +149,30 @@ export default function DashboardPage() {
                     </TableCell>
                   </TableRow>
                 ))}
+                {stats.monthXray !== 0 ? (
+                  <TableRow>
+                    <TableCell className="text-muted-foreground font-medium">
+                      الأشعة (دخل العيادة)
+                    </TableCell>
+                    <TableCell className="money text-muted-foreground text-end">
+                      {formatIQD(stats.monthXray)}
+                    </TableCell>
+                  </TableRow>
+                ) : null}
               </TableBody>
             </Table>
           )}
         </CardContent>
       </Card>
 
-      <section className="flex flex-col gap-3 sm:flex-row">
+      <section
+        data-tour="quick-actions"
+        className="animate-stagger flex flex-col gap-3 sm:flex-row"
+      >
         <Button
           size="lg"
           className="h-11 w-full sm:w-auto"
+          nativeButton={false}
           render={<Link href="/daily" />}
         >
           إضافة قيد اليوم
@@ -161,6 +181,7 @@ export default function DashboardPage() {
           size="lg"
           variant="outline"
           className="h-11 w-full sm:w-auto"
+          nativeButton={false}
           render={<Link href="/appointments" />}
         >
           مواعيد اليوم
@@ -169,9 +190,10 @@ export default function DashboardPage() {
           size="lg"
           variant="outline"
           className="h-11 w-full sm:w-auto"
+          nativeButton={false}
           render={<Link href="/debts" />}
         >
-          قائمة الديون
+          الديون
         </Button>
       </section>
     </div>

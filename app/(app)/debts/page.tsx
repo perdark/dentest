@@ -1,3 +1,4 @@
+import { PhoneCall } from "lucide-react";
 import { debtsList } from "@/lib/queries";
 import { formatIQD } from "@/lib/format";
 import { formatDateAr, todayISO } from "@/lib/dates";
@@ -26,31 +27,32 @@ export default function DebtsPage() {
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="text-2xl font-bold">الديون</h1>
+        <h1 className="flex items-center gap-2 text-2xl font-bold"><PhoneCall className="text-muted-foreground size-6 shrink-0" />الديون</h1>
         <p className="text-muted-foreground text-sm">
-          قائمة المرضى المتبقّي عليهم مبالغ — للاتصال والتحصيل.
+          أرصدة المرضى المتبقّية — للمتابعة والتحصيل.
         </p>
       </header>
 
-      <Card size="sm" className="bg-destructive/5 ring-destructive/20">
+      {/* العيادة طلبت اسم «الديون» صراحةً (2026-08-19) — عكس التسمية السابقة، وكلمة
+          «مستحقات» صارت محجوزة لمستحقات الأطباء وحدها. النبرة تبقى محايدة بلا لون
+          تحذير. التفاصيل في docs/OWNER-NOTES.md §3. */}
+      <Card size="sm" data-tour="debts-total" className="bg-primary/5 ring-primary/20">
         <CardHeader>
           <CardDescription>إجمالي الديون</CardDescription>
         </CardHeader>
         <CardContent>
-          <p className="money text-destructive text-2xl font-bold sm:text-3xl">
-            {formatIQD(total)}
-          </p>
+          <p className="money text-2xl font-bold sm:text-3xl">{formatIQD(total)}</p>
         </CardContent>
       </Card>
 
-      <Card>
+      <Card data-tour="debts-list">
         <CardHeader>
-          <CardTitle>قائمة الديون</CardTitle>
+          <CardTitle>أرصدة المرضى</CardTitle>
         </CardHeader>
         <CardContent>
           {rows.length === 0 ? (
             <p className="text-muted-foreground py-10 text-center text-sm">
-              لا توجد ديون مستحقة.
+              لا توجد ديون — كل الحسابات مسدَّدة.
             </p>
           ) : (
             <Table>
@@ -80,15 +82,23 @@ export default function DebtsPage() {
                           {r.phone}
                         </a>
                       ) : (
-                        <span className="text-muted-foreground">—</span>
+                        <span className="text-muted-foreground/60 text-xs">
+                          بلا رقم
+                        </span>
                       )}
                     </TableCell>
                     <TableCell>{r.treatment}</TableCell>
                     <TableCell>{r.doctorName}</TableCell>
                     <TableCell>
-                      {r.lastPaymentDate ? formatDateAr(r.lastPaymentDate) : "—"}
+                      {r.lastPaymentDate ? (
+                        formatDateAr(r.lastPaymentDate)
+                      ) : (
+                        <span className="text-muted-foreground/60 text-xs">
+                          لا توجد دفعات
+                        </span>
+                      )}
                     </TableCell>
-                    <TableCell className="money text-destructive text-end font-semibold">
+                    <TableCell className="money text-end font-semibold">
                       {formatIQD(r.remaining)}
                     </TableCell>
                     <TableCell className="text-end">

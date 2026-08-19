@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { signPayload, safeEqual } from "@/lib/crypto";
 import { getSettings } from "@/lib/server-utils";
 
-const COOKIE = "dentest_session";
+const COOKIE = "zuha_session";
 const TTL_MS = 1000 * 60 * 60 * 12; // 12h
 
 export async function createSession(): Promise<void> {

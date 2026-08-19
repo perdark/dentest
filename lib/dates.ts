@@ -42,6 +42,28 @@ export function formatPeriodAr(period: string | null | undefined): string {
   return `${AR_MONTHS[m - 1]} ${y}`;
 }
 
+/** Shift a "YYYY-MM" period by delta months. */
+export function shiftPeriod(period: string, delta: number): string {
+  const [y, m] = period.split("-").map(Number);
+  const d = new Date(Date.UTC(y, m - 1 + delta, 1));
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}`;
+}
+
+/** Shift a "YYYY-MM-DD" date by delta days. */
+export function shiftISOByDays(iso: string, delta: number): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + delta);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Shift a "YYYY-MM-DD" date by delta months, clamping to the target month's last day. */
+export function shiftISOByMonths(iso: string, delta: number): string {
+  const [y, m, day] = iso.split("-").map(Number);
+  const lastDay = new Date(Date.UTC(y, m - 1 + delta + 1, 0)).getUTCDate();
+  const d = new Date(Date.UTC(y, m - 1 + delta, Math.min(day, lastDay)));
+  return d.toISOString().slice(0, 10);
+}
+
 /** Validate a YYYY-MM-DD string. */
 export function isValidISODate(s: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;

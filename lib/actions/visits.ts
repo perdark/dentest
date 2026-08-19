@@ -4,18 +4,26 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import {
   findOrCreatePatient,
+  findOrCreateTreatmentType,
   createCaseWithPayment,
   paymentFailureMessage,
   recordCasePayment,
+  treatmentTypeFailureMessage,
 } from "@/lib/mutations";
 import { formatIQD, parseAmount } from "@/lib/format";
 import { isValidISODate } from "@/lib/dates";
 import { requireAuth } from "@/lib/auth";
-import { getTreatmentType, openCasesBrief } from "@/lib/queries";
+import { openCasesBrief } from "@/lib/queries";
+import { medicalFlagsMarker } from "@/lib/strings";
 
 export type VisitFormState = { ok?: boolean; error?: string };
 
-export type CaseOption = { id: number; label: string };
+/**
+ * `remaining` travels as a number beside the label, never parsed back out of
+ * it: the live line under the amount field does arithmetic with it, and text
+ * that exists to be read must not double as a data channel.
+ */
+export type CaseOption = { id: number; label: string; remaining: number };
 
 /**
  * Server-side search for the payment picker. The clinic has hundreds of open
@@ -26,7 +34,10 @@ export async function searchCollectableCases(q: string): Promise<CaseOption[]> {
   const term = typeof q === "string" ? q.slice(0, 60) : "";
   return openCasesBrief(term).map((c) => ({
     id: c.id,
-    label: `${c.patientName} · ${c.treatment} · متبقٍ ${formatIQD(c.remaining)}`,
+    label:
+      `${c.patientName} · ${c.treatment} · متبقٍ ${formatIQD(c.remaining)}` +
+      medicalFlagsMarker(c.patientMedicalFlags),
+    remaining: c.remaining,
   }));
 }
 
@@ -41,7 +52,7 @@ export async function createVisitNewCase(
       patientName: z.string(),
       phone: z.string().optional(),
       doctorId: z.coerce.number(),
-      treatmentTypeId: z.coerce.number(),
+      treatmentName: z.string().trim().min(1),
       price: z.string().optional(),
       discount: z.string().optional(),
       paidNow: z.string().optional(),
@@ -54,18 +65,7 @@ export async function createVisitNewCase(
   const patientName = d.patientName.trim();
   if (!patientName) return { error: "اسم المريض مطلوب" };
   if (!Number.isInteger(d.doctorId) || d.doctorId <= 0) return { error: "اختر الطبيب" };
-  if (!Number.isInteger(d.treatmentTypeId) || d.treatmentTypeId <= 0)
-    return { error: "اختر العلاج" };
   if (!isValidISODate(d.date)) return { error: "التاريخ غير صحيح" };
-
-  const treatment = getTreatmentType(d.treatmentTypeId);
-  if (!treatment || !treatment.isActive) return { error: "نوع العلاج غير موجود" };
-  if (treatment.isImplant) {
-    return { error: "تُفتح حالات الزراعة من سجل الزراعة لإكمال بيانات البطاقة" };
-  }
-  if (treatment.isOrtho) {
-    return { error: "تُفتح حالات التقويم من سجل التقويم لإكمال بيانات الحالة" };
-  }
 
   // Totals are computed server-side — never trusted from the client.
   const price = parseAmount(d.price);
@@ -75,12 +75,19 @@ export async function createVisitNewCase(
   const total = Math.max(0, price - discount);
   if (paidNow > total) return { error: "الدفعة الأولى أكبر من إجمالي العلاج" };
 
+  // Last of the checks on purpose: this one can WRITE (a name nobody has typed
+  // before becomes a treatment type), so nothing gets created for a form that
+  // was going to be refused anyway. It also owns the D9 guard — an implant,
+  // ortho or X-ray name is refused here instead of being cloned as normal work.
+  const treatment = findOrCreateTreatmentType(d.treatmentName);
+  if (!treatment.ok) return { error: treatmentTypeFailureMessage(treatment.reason) };
+
   const patientId = findOrCreatePatient({ fullName: patientName, phone: d.phone || null });
 
   createCaseWithPayment({
     patientId,
     doctorId: d.doctorId,
-    treatmentTypeId: d.treatmentTypeId,
+    treatmentTypeId: treatment.id,
     openedDate: d.date,
     listPrice: price,
     discount,
