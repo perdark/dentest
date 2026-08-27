@@ -5,7 +5,8 @@ import { createPortal } from "react-dom";
 import { usePathname, useRouter } from "next/navigation";
 import { CircleQuestionMark, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { tourFor, tourSeenKey, type TourStep } from "@/lib/tour";
+import { tourFor, type TourStep } from "@/lib/tour";
+import { markTourSeen } from "@/lib/tour-state";
 
 const PANEL_WIDTH = 340;
 const GAP = 14; // space between the highlighted element and the panel
@@ -40,7 +41,14 @@ function targetRect(step: TourStep | undefined): DOMRect | null {
  * block for `position: fixed` descendants — the overlay would be trapped inside
  * a 56px-tall header instead of covering the screen.
  */
-export function Tour({ offerIntro }: { offerIntro: boolean }) {
+export function Tour({
+  offerIntro,
+  toursSeen,
+}: {
+  offerIntro: boolean;
+  /** Pathnames whose tour is done — read from the database by the layout. */
+  toursSeen: string[];
+}) {
   const pathname = usePathname();
   const router = useRouter();
   const steps = tourFor(pathname);
@@ -57,11 +65,10 @@ export function Tour({ offerIntro }: { offerIntro: boolean }) {
   const finish = useCallback(() => {
     setOpen(false);
     setIndex(0);
-    try {
-      localStorage.setItem(tourSeenKey(pathname), "1");
-    } catch {
-      // Private mode / storage disabled: the tour simply offers itself again.
-    }
+    // ⚠️ Fire-and-forget on purpose: closing the panel must not wait on a
+    // write. If it fails the tour simply offers itself again — the same
+    // behaviour the old localStorage version had when storage was blocked.
+    void markTourSeen(pathname).catch(() => {});
   }, [pathname]);
 
   const start = useCallback(() => {
@@ -78,21 +85,18 @@ export function Tour({ offerIntro }: { offerIntro: boolean }) {
   // Resetting on navigation is handled by remounting (the parent keys this
   // component on the pathname), not here: a tour's steps describe one screen,
   // so carrying its state across a route change is never right.
+  //
+  // 🔴 "Seen" comes from the database via props, not localStorage. In the
+  // packaged app the Next server binds a **new random port every launch**
+  // (`electron/main.js`, `srv.listen(0, ...)`), and browser storage is scoped
+  // per origin *including the port* — so every launch read an empty store and
+  // this tour reopened forever. See `lib/tour-state.ts`.
   useEffect(() => {
     if (!steps || !offerIntro || pathname !== "/dashboard") return;
-    let seen = true;
-    try {
-      seen = localStorage.getItem(tourSeenKey(pathname)) === "1";
-    } catch {
-      // Storage unavailable — treat as seen rather than reopening every visit.
-      seen = true;
-    }
-    // Reading "has this been seen" is a genuine read of external state on
-    // mount; there is no render-time source for it, because the server cannot
-    // know what this browser has stored.
+    if (toursSeen.includes(pathname)) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (!seen) setOpen(true);
-  }, [steps, pathname, offerIntro]);
+    setOpen(true);
+  }, [steps, pathname, offerIntro, toursSeen]);
 
   // Track the spotlight target through scrolling, resizing and step changes.
   useLayoutEffect(() => {
@@ -184,6 +188,7 @@ export function Tour({ offerIntro }: { offerIntro: boolean }) {
         type="button"
         variant="ghost"
         size="icon"
+        className="size-11"
         data-tour="help-button"
         aria-label={steps ? "شرح هذه الشاشة" : "الدليل"}
         title={steps ? "شرح هذه الشاشة" : "الدليل"}
@@ -241,7 +246,7 @@ export function Tour({ offerIntro }: { offerIntro: boolean }) {
                     type="button"
                     variant="ghost"
                     size="icon"
-                    className="-me-2 -mt-2 size-8 shrink-0"
+                    className="-me-2 -mt-2 size-11 shrink-0"
                     aria-label="إنهاء الشرح"
                     onClick={finish}
                   >
@@ -252,7 +257,7 @@ export function Tour({ offerIntro }: { offerIntro: boolean }) {
                 <p className="text-muted-foreground text-sm leading-relaxed">{step.body}</p>
 
                 <div className="mt-4 flex items-center justify-between gap-2">
-                  <span className="text-muted-foreground text-xs tabular-nums">
+                  <span className="text-muted-foreground text-sm tabular-nums">
                     {index + 1} / {total}
                   </span>
                   <div className="flex gap-2">
@@ -261,7 +266,7 @@ export function Tour({ offerIntro }: { offerIntro: boolean }) {
                         type="button"
                         variant="outline"
                         size="sm"
-                        className="h-9"
+                        className="h-11"
                         onClick={() => setIndex((i) => Math.max(0, i - 1))}
                       >
                         السابق
@@ -271,7 +276,7 @@ export function Tour({ offerIntro }: { offerIntro: boolean }) {
                         type="button"
                         variant="ghost"
                         size="sm"
-                        className="h-9"
+                        className="h-11"
                         onClick={finish}
                       >
                         تخطّي
@@ -281,7 +286,7 @@ export function Tour({ offerIntro }: { offerIntro: boolean }) {
                       ref={nextRef}
                       type="button"
                       size="sm"
-                      className="h-9"
+                      className="h-11"
                       onClick={() => (isLast ? finish() : setIndex((i) => i + 1))}
                     >
                       {isLast ? "تم" : "التالي"}

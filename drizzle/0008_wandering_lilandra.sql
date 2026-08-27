@@ -1,0 +1,1 @@
+ALTER TABLE `settings` ADD `tours_seen` text DEFAULT '[]' NOT NULL;

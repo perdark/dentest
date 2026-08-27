@@ -48,12 +48,12 @@ export const labEntries = sqliteTable(
     doctorId: integer("doctor_id")
       .notNull()
       .references(() => doctors.id),
-    // كل مختبر فرعان: ثابت / متحرك — وكل قيد موسوم بفرعه.
+    // كل مختبر فرعان: ثابت / متحرك — وكل تسجيل موسوم بفرعه.
     branch: text("branch", { enum: ["fixed", "mobile"] }).notNull(),
     entryDate: text("entry_date").notNull(), // YYYY-MM-DD
     amount: integer("amount").notNull(),
     note: text("note"),
-    // اختياري: أحياناً يُربط القيد بمريض بعينه، وأحياناً هو حساب شهري مجمّع.
+    // اختياري: أحياناً يُربط التسجيل بمريض بعينه، وأحياناً هو حساب شهري مجمّع.
     patientId: integer("patient_id").references(() => patients.id),
     createdAt: ts(),
   },
@@ -147,6 +147,10 @@ export const cases = sqliteTable(
     labCost: integer("lab_cost").notNull().default(0), // record-keeping (D6)
     labExternal: integer("lab_external", { mode: "boolean" }).notNull().default(true),
     // Ortho-specific
+    // المقدمة المتفق عليها — رقمٌ يُحدَّد عند فتح الحالة ثم يُسدَّد على دفعات
+    // (kind = "down_payment")، لا مبلغٌ يُقبض مرة واحدة. [قرار العيادة 2026-08-25]
+    // صفر = لم تُحدَّد مقدمة. غير مستعمل خارج التقويم.
+    downPaymentAgreed: integer("down_payment_agreed").notNull().default(0),
     hasComplaint: integer("has_complaint", { mode: "boolean" }).notNull().default(false),
     complaintNote: text("complaint_note"),
     nextAppointment: text("next_appointment"), // YYYY-MM-DD
@@ -193,6 +197,42 @@ export const payments = sqliteTable(
   ],
 );
 
+// ── X-ray films (سجل الأشعة) [D9] ───────────────────────────────────────────
+/**
+ * صورة أشعة — بلا مريض وبلا طبيب. [قرار العيادة 2026-08-25]
+ *
+ * كانت الأشعة تُسجَّل «حالة» على مريض بسعر ودفعات، فتلاحق المريض في «الديون».
+ * العيادة قالت إن الصورة بيعٌ نقدي في لحظته: نوعها، وهل صُوِّرت **داخل** العيادة
+ * أم جاءت من **خارجها**، وسعرها. لا اسم، ولا دَين، ولا طبيب.
+ *
+ * لذلك الفيلم **مدفوع بالكامل بتاريخه**: `price` هو ما دخل الصندوق يومها، وهو
+ * ما يقرأه `cashOnHand` و«دخل الأشعة» في الحصيلة. ويبقى الحكم الأصلي كما هو:
+ * **دخل الأشعة للعيادة ولا يدخل حصة أي طبيب**، فلا عمود `doctor_id` هنا أصلاً
+ * — الرقم لا يستطيع أن يتسرّب إلى حصة أحد. [D9]
+ *
+ * `placement` وصفٌ لا حساب: الداخل والخارج كلاهما دخل للعيادة، والتقسيم يُقرأ
+ * للمتابعة فقط.
+ */
+export const xrayFilms = sqliteTable(
+  "xray_films",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    filmDate: text("film_date").notNull(), // YYYY-MM-DD
+    treatmentTypeId: integer("treatment_type_id")
+      .notNull()
+      .references(() => treatmentTypes.id),
+    placement: text("placement", { enum: ["internal", "external"] })
+      .notNull()
+      .default("internal"),
+    price: integer("price").notNull().default(0),
+    createdAt: ts(),
+  },
+  (t) => [
+    index("xray_films_date_idx").on(t.filmDate),
+    index("xray_films_type_idx").on(t.treatmentTypeId),
+  ],
+);
+
 // ── Appointments (light scheduling = السجل الرئيسي: name + appointment) ──────
 export const appointments = sqliteTable(
   "appointments",
@@ -203,6 +243,7 @@ export const appointments = sqliteTable(
       .references(() => patients.id),
     doctorId: integer("doctor_id").references(() => doctors.id),
     apptDate: text("appt_date").notNull(), // YYYY-MM-DD
+    apptTime: text("appt_time"), // HH:MM, optional for older/flexible bookings
     status: text("status", { enum: ["booked", "came", "no_show"] })
       .notNull()
       .default("booked"),
@@ -302,6 +343,15 @@ export const settings = sqliteTable("settings", {
   // a clinic that starts real work on top of the demo would have fake money in
   // its books forever. NULL = the records are the clinic's own.
   demoDataAt: integer("demo_data_at"),
+  // ── Guided tours already seen ──
+  // 🔴 Was `localStorage`, which broke in the packaged app: `electron/main.js`
+  // starts the Next server on `srv.listen(0, ...)` — a **fresh random port on
+  // every launch** — and localStorage is scoped to the origin *including the
+  // port. So each launch got an empty store and the welcome tour reappeared
+  // forever. It never reproduced in a browser, where the port is fixed.
+  // The database lives in `userData`, so it is immune to that and to a cache
+  // clear. Stored as a JSON array of pathnames, e.g. `["/dashboard"]`.
+  toursSeen: text("tours_seen").notNull().default("[]"),
   updatedAt: integer("updated_at").default(sql`(unixepoch() * 1000)`),
 });
 
@@ -327,6 +377,44 @@ export const auditLog = sqliteTable("audit_log", {
   at: integer("at").default(sql`(unixepoch() * 1000)`),
 });
 
+// ── Case teeth (مخطط الأسنان) ───────────────────────────────────────────────
+// One row per marked target on a case. See docs/TOOTH-CHART-SPEC.md.
+//
+// A doctor does not always mean a tooth. «قلع» is a tooth, «حشوة» is a face of
+// a tooth, «الفك العلوي» is an arch and «تقويم»/«تنظيف» is the whole mouth.
+// `scope` records which of those was meant, so «الفك العلوي» stays ONE row and
+// is never expanded into 16 tooth rows — the expansion would lose the meaning.
+//
+// Tooth codes are FDI/ISO 3950 two-digit (11..48 permanent, 51..85 primary).
+// The reference data for them lives in `lib/db/teeth.ts`, in code rather than
+// in a table: it never changes, so there is nothing to migrate or seed.
+export const caseTeeth = sqliteTable(
+  "case_teeth",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    caseId: integer("case_id")
+      .notNull()
+      .references(() => cases.id),
+    scope: text("scope", { enum: ["tooth", "arch", "mouth"] })
+      .notNull()
+      .default("tooth"),
+    toothCode: integer("tooth_code"), // FDI; NULL unless scope="tooth"
+    arch: text("arch", { enum: ["upper", "lower"] }), // NULL unless scope="arch"
+    // Faces touched, only meaningful for a filling. JSON array of Surface.
+    surfaces: text("surfaces"), // JSON string; NULL = whole tooth
+    // Bridge span: members share spanId, the ends are abutments.
+    spanId: integer("span_id"),
+    spanRole: text("span_role", { enum: ["abutment", "pontic"] }),
+    note: text("note"), // the doctor's own words, still allowed
+    createdAt: ts(),
+  },
+  (t) => [
+    index("case_teeth_case_idx").on(t.caseId),
+    index("case_teeth_tooth_idx").on(t.toothCode),
+  ],
+);
+
+
 export type Doctor = typeof doctors.$inferSelect;
 export type Patient = typeof patients.$inferSelect;
 export type TreatmentType = typeof treatmentTypes.$inferSelect;
@@ -335,3 +423,5 @@ export type Payment = typeof payments.$inferSelect;
 export type Expense = typeof expenses.$inferSelect;
 export type MonthlySettlement = typeof monthlySettlements.$inferSelect;
 export type Settings = typeof settings.$inferSelect;
+export type CaseTooth = typeof caseTeeth.$inferSelect;
+export type XrayFilm = typeof xrayFilms.$inferSelect;

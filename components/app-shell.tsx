@@ -88,6 +88,7 @@ export function AppShell({
   cashOnHand,
   reserveThreshold,
   offerIntro,
+  toursSeen,
   children,
 }: {
   clinicName: string;
@@ -95,6 +96,8 @@ export function AppShell({
   reserveThreshold: number;
   /** System nobody has used for real yet — the intro tour may open itself. */
   offerIntro: boolean;
+  /** Pathnames whose tour is done. From the database, not localStorage. */
+  toursSeen: string[];
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -130,10 +133,15 @@ export function AppShell({
           <Sheet open={open} onOpenChange={setOpen}>
             <SheetTrigger
               render={
-                <Button variant="ghost" size="icon" className="md:hidden" aria-label="القائمة" />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-11 md:hidden"
+                  aria-label="القائمة"
+                />
               }
             >
-              <Menu className="size-5" />
+              <Menu className="size-6" />
             </SheetTrigger>
             <SheetContent side="right" className="w-72 p-0">
               <SheetTitle className="sr-only">القائمة</SheetTitle>
@@ -145,23 +153,35 @@ export function AppShell({
 
           {/* Keyed on the route so a tour never survives a navigation:
               its steps describe the screen it was opened on. */}
-          <Tour key={pathname} offerIntro={offerIntro} />
+          <Tour key={pathname} offerIntro={offerIntro} toursSeen={toursSeen} />
 
+          {/* أهم رقم في الواجهة: يُقرأ من بعيد، والحالة مكتوبة لا لوناً فقط. */}
           <div
             data-tour="cash"
             className={cn(
-              "flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm",
+              "flex items-center gap-2 rounded-md border px-2.5 py-1",
               overReserve ? "border-amber-500/40 bg-amber-50 text-amber-900" : "bg-muted/40",
             )}
             title="النقد المتوفر"
           >
             {overReserve ? (
-              <AlertTriangle className="size-4 text-amber-600" />
+              <AlertTriangle className="size-5 shrink-0 text-amber-600" />
             ) : (
-              <Wallet className="text-muted-foreground size-4" />
+              <Wallet className="text-muted-foreground size-5 shrink-0" />
             )}
-            <span className="text-muted-foreground hidden sm:inline">النقد المتوفر:</span>
-            <span className="money font-semibold">{formatIQD(cashOnHand)}</span>
+            <span className="flex flex-col leading-tight">
+              <span
+                className={cn(
+                  "text-xs",
+                  overReserve ? "text-amber-900" : "text-muted-foreground",
+                )}
+              >
+                {overReserve ? "أعلى من حد الاحتياطي" : "النقد المتوفر"}
+              </span>
+              <span className="money text-base font-bold sm:text-lg">
+                {formatIQD(cashOnHand)}
+              </span>
+            </span>
           </div>
         </header>
 

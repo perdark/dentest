@@ -11,6 +11,16 @@ export default async function AppLayout({
   await requireAuth();
   const settings = getSettings();
   const demoMode = settings.demoDataAt != null;
+  // ⚠️ Read here, not in the client: which tours are done now lives in the
+  // database (see `lib/tour-state.ts` for why localStorage was wrong). This
+  // row is already loaded, so it costs no extra query.
+  let toursSeen: string[] = [];
+  try {
+    toursSeen = JSON.parse(settings.toursSeen ?? "[]");
+    if (!Array.isArray(toursSeen)) toursSeen = [];
+  } catch {
+    toursSeen = [];
+  }
   return (
     <AppShell
       clinicName={settings.clinicName}
@@ -20,6 +30,7 @@ export default async function AppLayout({
       // which is exactly when an unprompted walkthrough helps rather than
       // interrupts.
       offerIntro={demoMode || !hasAnyRecords()}
+      toursSeen={toursSeen}
     >
       {children}
     </AppShell>
