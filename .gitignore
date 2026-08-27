@@ -15,6 +15,9 @@
 
 # next.js
 /.next/
+# Build dir for the e2e dev server — Next 16 dev locks one build dir per
+# process, so the e2e server needs its own (see ZUHA_DIST_DIR in e2e:server).
+/.next-e2e/
 /out/
 
 # production
@@ -59,3 +62,9 @@ verify.db-wal
 /playwright/.cache/
 /e2e/.auth/
 /e2e-backups/
+
+# ── مخرجات البناء ──
+# 🔴 `dist/` كان يخلي `git status` بـ1658 سطراً، 1561 منها `dist/win-unpacked`
+# — أي ملف حقيقي يضيع بين ضجيج البناء، و`git add -A` يبلع حزمة ويندوز كاملة.
+/dist/
+/build/
