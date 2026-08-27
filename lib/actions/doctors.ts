@@ -5,6 +5,8 @@ import { revalidatePath } from "next/cache";
 import {
   createDoctor,
   updateDoctor,
+  deleteDoctor,
+  doctorRefCounts,
   addLabEntry,
   deleteLabEntry,
   findOrCreatePatient,
@@ -103,7 +105,60 @@ export async function saveDoctor(
   return { ok: true };
 }
 
-// ── قيد مختبر ────────────────────────────────────────────────────────────────
+// ── حذف طبيب ─────────────────────────────────────────────────────────────────
+/**
+ * حذف طبيب — **فقط إذا ما عنده ولا سجل**.
+ *
+ * 🔴 `doctors.id` مربوط بخمسة جداول (الحالات · الدفعات · المواعيد · المختبر ·
+ * الحصائل الشهرية)، وأربعة منها `NOT NULL`. الحذف الحقيقي إمّا يفشل على
+ * المفتاح الأجنبي، أو — الأسوأ — يتّم مبالغ: حالة بنص مليون بلا طبيب، وشهر
+ * محسوب ما عاد ينحسب من جديد.
+ *
+ * فالحذف هنا للحالة الآمنة وحدها: اسم انكتب غلط، أو طبيب انضاف مرتين، قبل ما
+ * ينحجز عليه أي شغل. غير هيچ ⇒ **إيقاف** (`isActive: false`)، لأن بدفتر
+ * محاسبة الماضي ما يصير كذباً لأن أحداً غادر.
+ *
+ * ⚠️ العدّ يتكرر **داخل** المعاملة كذلك (`deleteDoctor`) — بين رسم الزر
+ * وضغطه ممكن تنحجز حالة.
+ */
+const deleteSchema = z.object({
+  id: z.coerce.number().int().positive(),
+});
+
+export async function removeDoctor(
+  _prev: DoctorState,
+  formData: FormData,
+): Promise<DoctorState> {
+  await requireAuth();
+  const parsed = deleteSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: "طبيب غير صالح" };
+  const { id } = parsed.data;
+
+  const refs = doctorRefCounts(id);
+  if (refs.total > 0) {
+    // رسالة تعدّ الأسباب بدل «ما ينحذف» المجردة — المالك لازم يعرف **ليش**،
+    // وإلا يظن البرنامج معطّل.
+    const parts: string[] = [];
+    if (refs.cases) parts.push(`${refs.cases} حالة`);
+    if (refs.payments) parts.push(`${refs.payments} دفعة`);
+    if (refs.appointments) parts.push(`${refs.appointments} موعد`);
+    if (refs.labEntries) parts.push(`${refs.labEntries} تسجيل مختبر`);
+    if (refs.settlements) parts.push(`${refs.settlements} حصيلة شهرية`);
+    return {
+      error: `ما ينحذف — مربوط بـ${parts.join(" · ")}. حذفه يتّم هذي السجلات. استعمل «موقوف» بدله.`,
+    };
+  }
+
+  const res = deleteDoctor(id);
+  if (!res.ok) {
+    // انحجز شي بين الفحص والحذف.
+    return { error: "ما ينحذف — انضاف له سجل قبل لحظة. جرّب مرة ثانية." };
+  }
+  revalidateDoctors(id);
+  return { ok: true };
+}
+
+// ── تسجيل مختبر ────────────────────────────────────────────────────────────────
 const labSchema = z.object({
   doctorId: z.coerce.number().int().positive(),
   branch: z.enum(["fixed", "mobile"]),
@@ -125,7 +180,7 @@ export async function addLabEntryAction(
   const amount = parseAmount(d.amount);
   if (amount === 0) return { error: "أدخل مبلغاً" };
 
-  // ربط القيد بمريض اختياري — كثير من قيود المختبر حساب شهري بلا مريض بعينه.
+  // ربط التسجيل بمريض اختياري — كثير من تسجيلات المختبر حساب شهري بلا مريض بعينه.
   const patientId = d.patientName ? findOrCreatePatient({ fullName: d.patientName }) : null;
 
   addLabEntry({
@@ -152,9 +207,9 @@ export async function removeLabEntry(
 ): Promise<DoctorState> {
   await requireAuth();
   const parsed = removeLabSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return { error: "قيد غير صالح" };
+  if (!parsed.success) return { error: "تسجيل غير صالح" };
 
-  if (!deleteLabEntry(parsed.data.id)) return { error: "لم يتم العثور على القيد" };
+  if (!deleteLabEntry(parsed.data.id)) return { error: "لم يتم العثور على التسجيل" };
 
   revalidateDoctors(parsed.data.doctorId);
   return { ok: true };

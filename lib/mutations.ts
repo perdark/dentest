@@ -15,7 +15,10 @@ import {
   counters,
   monthlySettlements,
   labEntries,
+  xrayFilms,
+  caseTeeth,
 } from "@/lib/db/schema";
+import { isValidToothCode, type Surface } from "@/lib/db/teeth";
 import { recordEdit, nextCounter } from "@/lib/server-utils";
 import { isValidISODate, monthOf } from "@/lib/dates";
 import { ORTHO_BUCKET, XRAY_BUCKET } from "@/lib/strings";
@@ -239,6 +242,8 @@ export interface NewCaseInput {
   device?: string | null;
   address?: string | null;
   labCost?: number;
+  /** المقدمة المتفق عليها (التقويم) — تُسدَّد لاحقاً على دفعات. [2026-08-25] */
+  downPaymentAgreed?: number;
   notes?: string | null;
 }
 
@@ -296,6 +301,7 @@ export const createCase = atomicMutation((input: NewCaseInput): number => {
       discount: input.discount,
       totalPrice: input.totalPrice,
       labCost: input.labCost ?? 0,
+      downPaymentAgreed: input.downPaymentAgreed ?? 0,
       device: input.device ?? null,
       addressSnapshot: input.address ?? null,
       notes: input.notes ?? null,
@@ -318,6 +324,7 @@ export const updateCaseMeta = atomicMutation((
     device: string | null;
     addressSnapshot: string | null;
     labCost: number;
+    downPaymentAgreed: number;
     hasComplaint: boolean;
     complaintNote: string | null;
     nextAppointment: string | null;
@@ -338,6 +345,14 @@ export const updateCaseMeta = atomicMutation((
         .where(eq(payments.caseId, caseId))
         .get()?.value ?? 0;
     if (fields.totalPrice < Math.max(0, paid)) return false;
+  }
+  // المقدمة المتفق عليها لا تنزل تحت ما قُبض منها فعلاً، وإلا صار «المتبقي من
+  // المقدمة» بالسالب وقرأته العيادة ديناً على نفسها. [2026-08-25]
+  if (fields.downPaymentAgreed !== undefined) {
+    if (!Number.isSafeInteger(fields.downPaymentAgreed) || fields.downPaymentAgreed < 0) {
+      return false;
+    }
+    if (fields.downPaymentAgreed < downPaymentCollected(caseId)) return false;
   }
   db.update(cases).set({ ...fields, updatedAt: Date.now() }).where(eq(cases.id, caseId)).run();
   recordEdit({
@@ -361,6 +376,17 @@ export interface NewPaymentInput {
   expectedCourse?: TreatmentCourse;
 }
 
+/** ما قُبض فعلاً من المقدمة على هذه الحالة (المقدمة وحدها، لا الجلسات). */
+function downPaymentCollected(caseId: number): number {
+  return (
+    db
+      .select({ value: sql<number>`coalesce(sum(${payments.amount}), 0)` })
+      .from(payments)
+      .where(and(eq(payments.caseId, caseId), eq(payments.kind, "down_payment")))
+      .get()?.value ?? 0
+  );
+}
+
 export type PaymentFailure =
   | "not_found"
   | "case_cancelled"
@@ -368,6 +394,7 @@ export type PaymentFailure =
   | "invalid_date"
   | "wrong_course"
   | "exceeds_remaining"
+  | "exceeds_down_payment"
   | "refund_exceeds_paid";
 
 export type PaymentResult =
@@ -382,6 +409,7 @@ export function paymentFailureMessage(reason: PaymentFailure): string {
     invalid_date: "التاريخ غير صحيح.",
     wrong_course: "الحالة لا تنتمي إلى سجل العلاج المطلوب.",
     exceeds_remaining: "المبلغ أكبر من الرصيد المتبقي.",
+    exceeds_down_payment: "المبلغ أكبر من المتبقي من المقدمة المتفق عليها.",
     refund_exceeds_paid: "مبلغ الاسترجاع أكبر من صافي المبالغ المدفوعة.",
   } satisfies Record<PaymentFailure, string>;
   return messages[reason];
@@ -463,11 +491,27 @@ export const recordCasePayment = sqlite.transaction(
       }
       // حالة التقويم المفتوحة لا سقف لها: كل جلسة بمبلغها، فلا «متبقٍ» يُتجاوز.
       // [2026-08-19] The refund guard above still applies to it in full.
+      const openEndedOrtho = isOpenEndedOrtho(
+        treatmentCase.treatmentTypeId,
+        treatmentCase.totalPrice,
+      );
       if (
-        !isOpenEndedOrtho(treatmentCase.treatmentTypeId, treatmentCase.totalPrice) &&
+        !openEndedOrtho &&
         input.amount > Math.max(0, treatmentCase.totalPrice - paid)
       ) {
         return { ok: false, reason: "exceeds_remaining" };
+      }
+      // المقدمة وحدها لها سقفها: هي مبلغ متفق عليه يُسدَّد على دفعات، فدفعة
+      // مقدمة تتجاوز ما بقي منه ليست مقدمة — هي جلسة أُدخلت في الحقل الخطأ.
+      // الجلسات تبقى بلا سقف. [قرار العيادة 2026-08-25]
+      if (
+        kind === "down_payment" &&
+        openEndedOrtho &&
+        treatmentCase.downPaymentAgreed > 0 &&
+        input.amount >
+          Math.max(0, treatmentCase.downPaymentAgreed - downPaymentCollected(input.caseId))
+      ) {
+        return { ok: false, reason: "exceeds_down_payment" };
       }
     }
 
@@ -514,11 +558,17 @@ export const createCaseWithPayment = sqlite.transaction(
       // المقدمة على حالة تقويم مفتوحة السعر لا تُقاس بإجمالي — لا إجمالي أصلاً.
       // [2026-08-19] كل ما عداها يبقى محكوماً بسقف الحالة.
       const openEnded = isOpenEndedOrtho(input.treatmentTypeId, input.totalPrice);
+      const agreedDown = input.downPaymentAgreed ?? 0;
       if (
         kind === "refund" ||
         !Number.isSafeInteger(input.firstPayment.amount) ||
         input.firstPayment.amount < 0 ||
-        (!openEnded && input.firstPayment.amount > input.totalPrice)
+        (!openEnded && input.firstPayment.amount > input.totalPrice) ||
+        // أول دفعة على حالة تقويم هي دفعةٌ من المقدمة المتفق عليها، لا مبلغ حر.
+        (openEnded &&
+          kind === "down_payment" &&
+          agreedDown > 0 &&
+          input.firstPayment.amount > agreedDown)
       ) {
         throw new Error("Initial payment violates the case balance");
       }
@@ -544,146 +594,189 @@ export const createCaseWithPayment = sqlite.transaction(
   input: NewCaseInput & { firstPayment?: { amount: number; kind?: NewPaymentInput["kind"]; note?: string | null } },
 ) => { caseId: number; paymentId: number | null };
 
-// ── X-rays (سجل الأشعة) [D9] ────────────────────────────────────────────────
-// An X-ray is billed and collected exactly like any other treatment — it is a
-// case with a price and payments — so it inherits the audit log, the closed
-// period rule, the daily ledger and the outstanding-balance list for free. The
-// one thing that makes it different is its settlement bucket, and that is
-// checked here so no screen can quietly bill dental work through this door.
-
-export type XrayFailure =
-  | "not_found"
-  | "not_xray"
+// ── X-ray films (سجل الأشعة) [D9] ───────────────────────────────────────────
+/**
+ * تسجيل صورة أشعة — بلا مريض وبلا دَين. [قرار العيادة 2026-08-25]
+ *
+ * الفيلم بيعٌ نقدي في لحظته: سعره هو ما دخل الصندوق بتاريخه، فلا دفعات ولا
+ * متبقٍ. والنوع يجب أن يكون من دلو الأشعة — وإلا صار بابٌ خلفيّ يُسجَّل منه
+ * علاج أسنان كدخل للعيادة خارج حصص الأطباء. [D9]
+ */
+export type XrayFilmFailure =
   | "invalid_date"
-  | "invalid_amount"
-  | "paid_exceeds_total";
+  | "invalid_price"
+  | "not_xray_type";
 
-export type XrayResult =
-  | { ok: true; caseId: number; paymentId: number | null; total: number }
-  | { ok: false; reason: XrayFailure };
+export type XrayFilmResult =
+  | { ok: true; filmId: number }
+  | { ok: false; reason: XrayFilmFailure };
 
-export function xrayFailureMessage(reason: XrayFailure): string {
+export function xrayFilmFailureMessage(reason: XrayFilmFailure): string {
   const messages = {
-    not_found: "نوع الأشعة غير موجود.",
-    not_xray: "النوع المختار ليس أشعة.",
     invalid_date: "التاريخ غير صحيح.",
-    invalid_amount: "المبالغ يجب أن تكون أرقاماً صحيحة غير سالبة.",
-    paid_exceeds_total: "المبلغ المدفوع أكبر من قيمة الأشعة.",
-  } satisfies Record<XrayFailure, string>;
+    invalid_price: "أدخل سعراً صحيحاً (صفر أو أكثر).",
+    not_xray_type: "النوع المختار ليس نوع أشعة.",
+  } satisfies Record<XrayFilmFailure, string>;
   return messages[reason];
 }
 
-export const recordXray = sqlite.transaction(
-  (input: {
-    patientId: number;
-    doctorId: number;
-    treatmentTypeId: number;
-    date: string; // YYYY-MM-DD
-    listPrice: number;
-    discount: number;
-    paidNow: number;
-    note?: string | null;
-  }): XrayResult => {
-    const type = db
-      .select()
-      .from(treatmentTypes)
-      .where(eq(treatmentTypes.id, input.treatmentTypeId))
-      .get();
-    if (!type || !type.isActive) return { ok: false, reason: "not_found" };
-    if (type.settlementBucket !== "xray") return { ok: false, reason: "not_xray" };
-    if (!isValidISODate(input.date)) return { ok: false, reason: "invalid_date" };
-
-    const amounts = [input.listPrice, input.discount, input.paidNow];
-    if (amounts.some((n) => !Number.isSafeInteger(n) || n < 0)) {
-      return { ok: false, reason: "invalid_amount" };
-    }
-
-    // The agreed total is derived here, never taken from the caller.
-    const total = Math.max(0, input.listPrice - input.discount);
-    if (input.paidNow > total) return { ok: false, reason: "paid_exceeds_total" };
-
-    const { caseId, paymentId } = createCaseWithPayment({
-      patientId: input.patientId,
-      doctorId: input.doctorId,
-      treatmentTypeId: input.treatmentTypeId,
-      openedDate: input.date,
-      listPrice: input.listPrice,
-      discount: input.discount,
-      totalPrice: total,
-      notes: input.note ?? null,
-      firstPayment:
-        input.paidNow > 0 ? { amount: input.paidNow, kind: "down_payment" } : undefined,
-    });
-
-    return { ok: true, caseId, paymentId, total };
-  },
-) as unknown as (input: {
-  patientId: number;
-  doctorId: number;
+export const recordXrayFilm = atomicMutation((input: {
+  filmDate: string;
   treatmentTypeId: number;
-  date: string;
-  listPrice: number;
-  discount: number;
-  paidNow: number;
-  note?: string | null;
-}) => XrayResult;
-
-export type XrayRemovalFailure = "not_found" | "not_xray" | "has_payments";
-
-/**
- * Remove a mis-entered X-ray.
- *
- * X-rays are typed dozens of times a month at the desk, so typos are certain in
- * a way they are not for an implant card opened once with the patient sitting
- * there. Without this, a wrong film sits in the register forever and keeps a
- * balance the clinic would chase.
- *
- * A film that already took money is NOT deletable here: cash that was received
- * is a real event, and the only clean way to undo it is voiding the payment in
- * the daily ledger, which nets it out of the day and the audit trail. So the
- * order is enforced — void the money first, then remove the row. [A1]
- */
-export const removeXray = atomicMutation((
-  caseId: number,
-): { ok: true } | { ok: false; reason: XrayRemovalFailure } => {
-  const before = db.select().from(cases).where(eq(cases.id, caseId)).get();
-  if (!before) return { ok: false, reason: "not_found" };
-
+  placement: "internal" | "external";
+  price: number;
+}): XrayFilmResult => {
+  if (!isValidISODate(input.filmDate)) {
+    return { ok: false, reason: "invalid_date" };
+  }
+  if (!Number.isSafeInteger(input.price) || input.price < 0) {
+    return { ok: false, reason: "invalid_price" };
+  }
   const type = db
     .select({ bucket: treatmentTypes.settlementBucket })
     .from(treatmentTypes)
-    .where(eq(treatmentTypes.id, before.treatmentTypeId))
+    .where(eq(treatmentTypes.id, input.treatmentTypeId))
     .get();
-  if (type?.bucket !== "xray") return { ok: false, reason: "not_xray" };
+  if (!type || type.bucket !== XRAY_BUCKET) {
+    return { ok: false, reason: "not_xray_type" };
+  }
 
-  const paymentCount =
-    db
-      .select({ v: sql<number>`count(*)` })
-      .from(payments)
-      .where(eq(payments.caseId, caseId))
-      .get()?.v ?? 0;
-  if (paymentCount > 0) return { ok: false, reason: "has_payments" };
-
-  db.delete(cases).where(eq(cases.id, caseId)).run();
+  const res = db
+    .insert(xrayFilms)
+    .values({
+      filmDate: input.filmDate,
+      treatmentTypeId: input.treatmentTypeId,
+      placement: input.placement,
+      price: input.price,
+    })
+    .run();
+  const filmId = Number(res.lastInsertRowid);
   recordEdit({
-    entity: "cases",
-    entityId: caseId,
-    action: "delete",
-    before,
-    period: monthOf(before.openedDate),
-    note: "xray removed",
+    entity: "xray_films",
+    entityId: filmId,
+    action: "insert",
+    after: input,
+    period: monthOf(input.filmDate),
   });
-  return { ok: true };
+  return { ok: true, filmId };
 });
 
-export function xrayRemovalFailureMessage(reason: XrayRemovalFailure): string {
-  const messages = {
-    not_found: "لم يتم العثور على الأشعة.",
-    not_xray: "هذا السجل ليس أشعة.",
-    has_payments: "عليها دفعة مسجّلة — ألغِ الدفعة من الدفتر اليومي أولاً ثم احذفها.",
-  } satisfies Record<XrayRemovalFailure, string>;
-  return messages[reason];
+/** حذف صورة مُسجَّلة خطأً. السطر يبقى كاملاً في سجل التعديلات. */
+export const deleteXrayFilm = atomicMutation((id: number): boolean => {
+  const before = db.select().from(xrayFilms).where(eq(xrayFilms.id, id)).get();
+  if (!before) return false;
+  db.delete(xrayFilms).where(eq(xrayFilms.id, id)).run();
+  recordEdit({
+    entity: "xray_films",
+    entityId: id,
+    action: "delete",
+    before,
+    period: monthOf(before.filmDate),
+    note: "xray film removed",
+  });
+  return true;
+});
+
+// ملاحظة: لم تعد الأشعة تُسجَّل «حالة» على مريض — انظر `recordXrayFilm` أعلاه
+// و`docs/OWNER-NOTES.md` §14. الصفوف القديمة تبقى في قاعدة البيانات وتُقرأ في
+// «دخل الأشعة» (`xrayIncomeForPeriod`)، ولا شيء ينشئ صفاً جديداً منها.
+
+// ── Case teeth (مخطط الأسنان) ───────────────────────────────────────────────
+// See docs/TOOTH-CHART-SPEC.md. The scope rules below are the reason this is a
+// mutation and not an insert from a screen: SQLite CHECK constraints cannot
+// express "exactly one of toothCode/arch, depending on scope", and a chart that
+// stores an arch as 16 tooth rows silently destroys what the doctor said.
+
+export type ToothMarkInput =
+  | { scope: "tooth"; toothCode: number; surfaces?: Surface[]; spanId?: number; spanRole?: "abutment" | "pontic"; note?: string }
+  | { scope: "arch"; arch: "upper" | "lower"; note?: string }
+  | { scope: "mouth"; note?: string };
+
+export type ToothMarkFailure =
+  | "case_not_found"
+  | "bad_tooth_code"
+  | "duplicate_tooth"
+  | "bad_surfaces";
+
+export function toothMarkFailureMessage(reason: ToothMarkFailure): string {
+  switch (reason) {
+    case "case_not_found":
+      return "الحالة غير موجودة.";
+    case "bad_tooth_code":
+      return "رقم السن غير صحيح.";
+    case "duplicate_tooth":
+      return "السن مُعلَّم مرتين في نفس الحالة.";
+    case "bad_surfaces":
+      return "سطح غير صحيح لهذا السن.";
+  }
 }
+
+const VALID_SURFACES: readonly Surface[] = ["mesial", "distal", "facial", "oral", "occlusal"];
+
+/**
+ * Replace every mark on a case with `marks`. Replace-all, not append: the chart
+ * is a picture of the case, and the screen always sends the whole picture, so a
+ * de-selected tooth disappears without needing a separate delete path.
+ *
+ * Passing an empty array is legitimate and clears the chart — «تقويم» and
+ * «تنظيف» have no tooth at all, and forcing one would make the clerk invent it.
+ */
+export const setCaseTeeth = atomicMutation(
+  (caseId: number, marks: ToothMarkInput[]): { ok: true } | { ok: false; reason: ToothMarkFailure } => {
+    const theCase = db.select().from(cases).where(eq(cases.id, caseId)).get();
+    if (!theCase) return { ok: false, reason: "case_not_found" };
+
+    const seen = new Set<string>();
+    for (const m of marks) {
+      if (m.scope === "tooth") {
+        if (!isValidToothCode(m.toothCode)) return { ok: false, reason: "bad_tooth_code" };
+        if (m.surfaces) {
+          if (m.surfaces.length === 0) return { ok: false, reason: "bad_surfaces" };
+          for (const f of m.surfaces) {
+            if (!VALID_SURFACES.includes(f)) return { ok: false, reason: "bad_surfaces" };
+          }
+        }
+        // The same tooth may appear twice only if the faces differ (two separate
+        // fillings on one tooth), so the identity is tooth + its face set.
+        const key = `${m.toothCode}:${[...(m.surfaces ?? [])].sort().join(",")}`;
+        if (seen.has(key)) return { ok: false, reason: "duplicate_tooth" };
+        seen.add(key);
+      }
+    }
+
+    const before = db.select().from(caseTeeth).where(eq(caseTeeth.caseId, caseId)).all();
+    db.delete(caseTeeth).where(eq(caseTeeth.caseId, caseId)).run();
+
+    for (const m of marks) {
+      db.insert(caseTeeth)
+        .values({
+          caseId,
+          scope: m.scope,
+          toothCode: m.scope === "tooth" ? m.toothCode : null,
+          arch: m.scope === "arch" ? m.arch : null,
+          surfaces:
+            m.scope === "tooth" && m.surfaces && m.surfaces.length > 0
+              ? JSON.stringify(m.surfaces)
+              : null,
+          spanId: m.scope === "tooth" ? (m.spanId ?? null) : null,
+          spanRole: m.scope === "tooth" ? (m.spanRole ?? null) : null,
+          note: m.note ?? null,
+        })
+        .run();
+    }
+
+    recordEdit({
+      entity: "case_teeth",
+      entityId: caseId,
+      action: "update",
+      before,
+      after: marks,
+      period: monthOf(theCase.openedDate),
+    });
+    return { ok: true };
+  },
+);
+
 
 // ── Appointments (السجل الرئيسي: اسم المراجع + موعده) [B1] ────────────────────
 // Deliberately holds NO clinical detail — the clinic was explicit that this
@@ -695,6 +788,7 @@ export const createAppointment = atomicMutation((input: {
   patientId: number;
   doctorId?: number | null;
   apptDate: string; // YYYY-MM-DD
+  apptTime?: string | null; // HH:MM
   note?: string | null;
 }): number => {
   const res = db
@@ -703,6 +797,7 @@ export const createAppointment = atomicMutation((input: {
       patientId: input.patientId,
       doctorId: input.doctorId ?? null,
       apptDate: input.apptDate,
+      apptTime: input.apptTime || null,
       note: input.note?.trim() || null,
     })
     .run();
@@ -862,6 +957,75 @@ export const createDoctor = atomicMutation((input: {
   return id;
 });
 
+/**
+ * How many accounting records point at this doctor.
+ *
+ * ⚠️ Read this before offering to delete. `doctors.id` is referenced by five
+ * tables — lab_entries, cases, payments, appointments, monthly_settlements —
+ * and four of those columns are NOT NULL. A real DELETE either fails on the
+ * foreign key or, worse, orphans money: a 500,000 case with no doctor, and a
+ * settled month that can no longer be recomputed.
+ */
+export function doctorRefCounts(id: number): {
+  cases: number;
+  payments: number;
+  appointments: number;
+  labEntries: number;
+  settlements: number;
+  total: number;
+} {
+  // ⚠️ Five explicit queries rather than a generic helper: the table/column
+  // types drizzle exposes differ per table, and a shared signature would need
+  // `any`. Repetition is cheaper than losing type-checking on a delete guard.
+  const n = (v: { n: number } | undefined) => v?.n ?? 0;
+  const counts = {
+    cases: n(db.select({ n: sql<number>`count(*)` }).from(cases).where(eq(cases.doctorId, id)).get()),
+    payments: n(
+      db.select({ n: sql<number>`count(*)` }).from(payments).where(eq(payments.doctorId, id)).get(),
+    ),
+    appointments: n(
+      db
+        .select({ n: sql<number>`count(*)` })
+        .from(appointments)
+        .where(eq(appointments.doctorId, id))
+        .get(),
+    ),
+    labEntries: n(
+      db.select({ n: sql<number>`count(*)` }).from(labEntries).where(eq(labEntries.doctorId, id)).get(),
+    ),
+    settlements: n(
+      db
+        .select({ n: sql<number>`count(*)` })
+        .from(monthlySettlements)
+        .where(eq(monthlySettlements.doctorId, id))
+        .get(),
+    ),
+  };
+  return { ...counts, total: Object.values(counts).reduce((a, b) => a + b, 0) };
+}
+
+/**
+ * Delete a doctor **only if nothing references them**.
+ *
+ * The safe case this exists for: a name typed by mistake, or a doctor added
+ * twice, before any work is booked against them. Anything else must be
+ * deactivated instead (`updateDoctor({ isActive: false })`) — in a ledger the
+ * past does not become untrue because someone left.
+ *
+ * ⚠️ Re-counts inside the mutation rather than trusting the caller's earlier
+ * check: between rendering the button and pressing it, a case could have been
+ * booked. `atomicMutation` wraps this in a transaction, so the count and the
+ * delete cannot be split.
+ */
+export const deleteDoctor = atomicMutation((id: number): { ok: boolean; refs: number } => {
+  const refs = doctorRefCounts(id).total;
+  if (refs > 0) return { ok: false, refs };
+  const before = db.select().from(doctors).where(eq(doctors.id, id)).get();
+  db.delete(doctors).where(eq(doctors.id, id)).run();
+  recordEdit({ entity: "doctors", entityId: id, action: "delete", before });
+  return { ok: true, refs: 0 };
+});
+
 // ── مستحقات المختبر (تتبّع فقط) ──────────────────────────────────────────────
 /**
  * Record what a doctor owes his lab, or a payment he made to it (negative).
@@ -928,6 +1092,7 @@ export interface WipeCounts {
   expenses: number;
   cashMovements: number;
   settlements: number;
+  xrayFilms: number;
 }
 
 /**
@@ -956,6 +1121,9 @@ export const wipeAllRecords = atomicMutation((note: string): WipeCounts => {
     expenses: count(db.select({ id: expenses.id }).from(expenses).all()),
     cashMovements: count(db.select({ id: cashMovements.id }).from(cashMovements).all()),
     settlements: count(db.select({ id: monthlySettlements.id }).from(monthlySettlements).all()),
+    // الفيلم لا يرتبط بمريض، فلا تحذفه سلسلةُ الحذف تلقائياً — ولو بقي لبقي
+    // دخل أشعة تجريبي في دفاتر العيادة الحقيقية إلى الأبد. [2026-08-25]
+    xrayFilms: count(db.select({ id: xrayFilms.id }).from(xrayFilms).all()),
   };
 
   // Children before parents — foreign keys are ON.
@@ -966,6 +1134,7 @@ export const wipeAllRecords = atomicMutation((note: string): WipeCounts => {
   db.delete(expenses).run();
   db.delete(cashMovements).run();
   db.delete(monthlySettlements).run();
+  db.delete(xrayFilms).run();
   db.delete(auditLog).run();
 
   db.update(counters).set({ value: 0 }).run();

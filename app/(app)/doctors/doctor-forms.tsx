@@ -17,12 +17,15 @@ import {
 import { NativeSelect } from "@/components/forms/native-select";
 import { SubmitButton } from "@/components/forms/submit-button";
 import { useActionToast } from "@/components/forms/use-action-toast";
+import { FormError } from "@/components/forms/form-error";
 import { MoneySummary } from "@/components/forms/money-summary";
-import { parseAmount } from "@/lib/format";
+import { formatIQD, parseAmount } from "@/lib/format";
+import { formatDateAr } from "@/lib/dates";
 import { LAB_BRANCH_LABELS } from "@/lib/strings";
 import {
   addDoctor,
   saveDoctor,
+  removeDoctor,
   addLabEntryAction,
   removeLabEntry,
   type DoctorState,
@@ -79,7 +82,7 @@ export function AddDoctorDialog() {
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="dr-lab">اسم المختبر</Label>
+            <Label htmlFor="dr-lab">اسم المختبر (اختياري)</Label>
             <Input id="dr-lab" name="labName" autoComplete="off" className="h-11" />
           </div>
 
@@ -88,7 +91,7 @@ export function AddDoctorDialog() {
             يعمل تقويم أسنان
           </label>
 
-          {state.error ? <p className="text-destructive text-sm">{state.error}</p> : null}
+          <FormError>{state.error}</FormError>
 
           <div className="flex flex-col-reverse gap-2 pt-1 sm:flex-row sm:justify-end">
             <DialogClose
@@ -186,14 +189,14 @@ export function DoctorInfoForm({
         </label>
       </div>
 
-      {state.error ? <p className="text-destructive text-sm">{state.error}</p> : null}
+      <FormError>{state.error}</FormError>
 
       <SubmitButton className="h-11">حفظ البيانات</SubmitButton>
     </form>
   );
 }
 
-// ── قيد مختبر جديد ───────────────────────────────────────────────────────────
+// ── تسجيل مختبر جديد ───────────────────────────────────────────────────────────
 export function LabEntryForm({ doctorId, today }: { doctorId: number; today: string }) {
   const formRef = useRef<HTMLFormElement>(null);
   const [amount, setAmount] = useState("");
@@ -204,7 +207,7 @@ export function LabEntryForm({ doctorId, today }: { doctorId: number; today: str
 
   useActionToast(
     state,
-    "تم حفظ قيد المختبر",
+    "تم حفظ تسجيل المختبر",
     useCallback(() => {
       formRef.current?.reset();
       setAmount("");
@@ -228,7 +231,7 @@ export function LabEntryForm({ doctorId, today }: { doctorId: number; today: str
             id="le-amount"
             name="amount"
             inputMode="numeric"
-            className="h-11"
+            className="h-11 text-base tabular-nums"
             placeholder="0"
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
@@ -264,7 +267,7 @@ export function LabEntryForm({ doctorId, today }: { doctorId: number; today: str
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="le-note">ملاحظة</Label>
+        <Label htmlFor="le-note">ملاحظة (اختياري)</Label>
         <Input id="le-note" name="note" autoComplete="off" className="h-11" />
       </div>
 
@@ -274,35 +277,173 @@ export function LabEntryForm({ doctorId, today }: { doctorId: number; today: str
         />
       ) : null}
 
-      {state.error ? <p className="text-destructive text-sm">{state.error}</p> : null}
+      <FormError>{state.error}</FormError>
 
-      <SubmitButton className="h-11 sm:self-start">إضافة القيد</SubmitButton>
+      <SubmitButton className="h-11 sm:self-start">إضافة التسجيل</SubmitButton>
     </form>
   );
 }
 
-// ── حذف قيد ──────────────────────────────────────────────────────────────────
-export function DeleteLabEntry({ id, doctorId }: { id: number; doctorId: number }) {
+// ── حذف تسجيل ──────────────────────────────────────────────────────────────────
+/**
+ * حذف تسجيل مختبر — بتأكيد قبله ورسالة بعده.
+ *
+ * كان الزر يحذف بضغطة واحدة: سلة مهملات صغيرة في آخر صف من جدول مزدحم، بلا
+ * سؤال وبلا تراجع. سطر مال يختفي من مستحقات المختبر ولا يعرف أحد أنه اختفى،
+ * ولو فشل الحذف لم يظهر شيء أصلاً لأن `state.error` لم يكن يُطبع في أي مكان.
+ * التسجيل يبقى بعد الحذف في «سجل التعديلات»، وهذا ما تقوله النافذة.
+ */
+export function DeleteLabEntry({
+  id,
+  doctorId,
+  amount,
+  entryDate,
+}: {
+  id: number;
+  doctorId: number;
+  amount: number;
+  entryDate: string;
+}) {
+  const [open, setOpen] = useState(false);
   const [state, formAction, pending] = useActionState<DoctorState, FormData>(
     removeLabEntry,
     {},
   );
-  useActionToast(state, "تم حذف القيد");
+
+  useActionToast(
+    state,
+    "تم حذف التسجيل",
+    useCallback(() => setOpen(false), []),
+  );
 
   return (
-    <form action={formAction}>
-      <input type="hidden" name="id" value={id} />
-      <input type="hidden" name="doctorId" value={doctorId} />
-      <Button
-        type="submit"
-        variant="ghost"
-        size="icon"
-        className="text-muted-foreground hover:text-destructive size-11"
-        aria-label="حذف قيد المختبر"
-        disabled={pending}
-      >
-        <Trash2 className="size-4" />
-      </Button>
-    </form>
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="icon"
+            className="text-muted-foreground hover:text-destructive size-11"
+            aria-label="حذف تسجيل المختبر"
+          >
+            <Trash2 className="size-4" />
+          </Button>
+        }
+      />
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>حذف تسجيل المختبر</DialogTitle>
+          <DialogDescription>
+            سيُحذف تسجيل <span className="money">{formatIQD(amount)}</span> بتاريخ{" "}
+            {formatDateAr(entryDate)}. مستحقات المختبر متابعة فقط ولا تُخصم من
+            حصة الطبيب، ويبقى الحذف مسجّلاً في «سجل التعديلات».
+          </DialogDescription>
+        </DialogHeader>
+
+        <form action={formAction} className="flex flex-col gap-4">
+          <input type="hidden" name="id" value={id} />
+          <input type="hidden" name="doctorId" value={doctorId} />
+
+          <FormError>{state.error}</FormError>
+
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <DialogClose
+              render={
+                <Button type="button" variant="outline" className="h-11">
+                  تراجع
+                </Button>
+              }
+            />
+            <Button
+              type="submit"
+              variant="destructive"
+              className="h-11"
+              disabled={pending}
+            >
+              {pending ? "جارٍ الحذف…" : "تأكيد الحذف"}
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── حذف طبيب ──────────────────────────────────────────────────────────────────
+/**
+ * حذف طبيب — متاح للأطباء **بلا أي سجل** فقط.
+ *
+ * 🔴 ليش مو حذفاً عادياً: `doctors.id` مربوط بخمسة جداول، وأربعة منها
+ * `NOT NULL`. حذف طبيب عنده شغل يتّم حالاته ودفعاته وحصائله — يعني رقم مالي
+ * بلا صاحب، وشهر محسوب ما عاد ينحسب.
+ *
+ * فالزر يظهر **دائماً**، والخادم هو اللي يرفض ويشرح السبب بالعدد. إخفاؤه كان
+ * راح يخلي المالك يدور على ميزة يظن إنها ناقصة؛ الرفض المشروح يعلّمه القاعدة
+ * مرة وحدة: اللي عنده تاريخ **يُوقَف** لا يُحذف.
+ *
+ * ⚠️ النافذة تذكر «موقوف» صراحةً حتى يعرف البديل بلا ما يسأل.
+ */
+export function DeleteDoctor({ id, name }: { id: number; name: string }) {
+  const [open, setOpen] = useState(false);
+  const [state, formAction, pending] = useActionState<DoctorState, FormData>(
+    removeDoctor,
+    {},
+  );
+
+  useActionToast(
+    state,
+    "تم حذف الطبيب",
+    useCallback(() => setOpen(false), []),
+  );
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="icon"
+            className="text-muted-foreground hover:text-destructive size-11"
+            aria-label={`حذف الطبيب ${name}`}
+          >
+            <Trash2 className="size-4" />
+          </Button>
+        }
+      />
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>حذف {name}</DialogTitle>
+          <DialogDescription>
+            الحذف متاح فقط لطبيب ما عنده ولا حالة ولا دفعة ولا موعد — يعني اسم
+            انضاف بالغلط. الطبيب اللي عنده شغل مسجّل <b>ما ينحذف</b>: خلّيه
+            «موقوف» بدل ذلك، فيختفي من القوائم ويبقى تاريخه سليماً.
+          </DialogDescription>
+        </DialogHeader>
+
+        <form action={formAction} className="flex flex-col gap-4">
+          <input type="hidden" name="id" value={id} />
+
+          <FormError>{state.error}</FormError>
+
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <DialogClose
+              render={
+                <Button type="button" variant="outline" className="h-11">
+                  تراجع
+                </Button>
+              }
+            />
+            <Button
+              type="submit"
+              variant="destructive"
+              className="h-11"
+              disabled={pending}
+            >
+              {pending ? "جارٍ الحذف…" : "تأكيد الحذف"}
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
