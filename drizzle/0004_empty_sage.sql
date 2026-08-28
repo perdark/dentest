@@ -1,0 +1,1 @@
+ALTER TABLE `appointments` ADD `appt_time` text;
