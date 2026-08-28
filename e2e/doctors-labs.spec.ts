@@ -17,8 +17,8 @@ test("a lab entry reaches the doctor page and lands in the right branch", async 
   const list = page.locator('[data-tour="doctors-list"]');
   await expect(list).toBeVisible();
 
-  // مستحقات العيادة ومستحقات المختبر رقمان مختلفان على البطاقة نفسها.
-  await expect(list).toContainText("مستحقات العيادة");
+  // المستحق للطبيب ومستحقات المختبر رقمان مختلفان على البطاقة نفسها.
+  await expect(list).toContainText("المستحق للطبيب");
   await expect(list).toContainText("مستحقات المختبر (ثابت)");
 
   await list.getByRole("link").first().click();
@@ -29,9 +29,9 @@ test("a lab entry reaches the doctor page and lands in the right branch", async 
   await labCard.getByLabel("المبلغ").fill("300000");
   await labCard.locator("#le-branch").selectOption("mobile");
   await labCard.getByLabel("ملاحظة").fill("حساب الشهر");
-  await labCard.getByRole("button", { name: "إضافة القيد" }).click();
+  await labCard.getByRole("button", { name: "إضافة التسجيل" }).click();
 
-  // القيد يظهر في جدول الشهر، وفي مجموع الفرع المتحرك دون الثابت.
+  // التسجيل يظهر في جدول الشهر، وفي مجموع الفرع المتحرك دون الثابت.
   await expect(labCard).toContainText("حساب الشهر");
   await expect(labCard).toContainText("متحرك");
 

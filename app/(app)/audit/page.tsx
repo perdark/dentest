@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { AlertTriangle, History } from "lucide-react";
 import { auditTrail, auditEntities, closedPeriodEditCount } from "@/lib/queries";
-import { formatPeriodAr } from "@/lib/dates";
+import { formatDateShortY, formatPeriodAr, formatTime12 } from "@/lib/dates";
+import { formatIQD } from "@/lib/format";
 import { AUDIT_ACTION_LABELS, AUDIT_ENTITY_LABELS } from "@/lib/strings";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -19,12 +20,13 @@ import {
 
 export const metadata: Metadata = { title: "سجل التعديلات" };
 
-/** epoch ms -> "YYYY-MM-DD HH:mm" في التوقيت المحلي. */
+/** epoch ms -> «8/30/2026 2:30 م» في التوقيت المحلي. */
 function formatStamp(at: number | null): string {
   if (!at) return "";
   const d = new Date(at);
   const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  const date = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  return `${formatDateShortY(date)} ${formatTime12(`${p(d.getHours())}:${p(d.getMinutes())}`)}`;
 }
 
 const ACTION_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
@@ -32,6 +34,44 @@ const ACTION_VARIANT: Record<string, "default" | "secondary" | "destructive" | "
   update: "secondary",
   delete: "destructive",
 };
+
+/**
+ * الملاحظات التي تكتبها طبقة الحفظ بالإنجليزية للمطوّر — تُقرأ هنا بالعربية.
+ * أي ملاحظة غير معروفة تُعرض كما هي.
+ */
+const AUDIT_NOTE_LABELS: Record<string, string> = {
+  "settlement closed": "إقفال الحصيلة الشهرية",
+  "settlement reopened": "إعادة فتح الحصيلة الشهرية",
+  "settlement payout finalized": "اعتماد صرف حصص الأطباء",
+  "settlement payout cash outflow": "خروج نقد لصرف حصص الأطباء",
+  "treatment retyped in the daily entry": "إعادة تفعيل نوع علاج من الدفتر اليومي",
+  "payment voided": "إلغاء دفعة",
+  "xray removed": "حذف صورة أشعة",
+};
+
+/**
+ * المبلغ الذي تحرّك في هذا السطر، إن وُجد.
+ *
+ * كان العمود يطبع رقم السطر في قاعدة البيانات: رقم لا يدلّ العيادة على شيء ولا
+ * يمكن البحث به. الدفعات والمصروفات والحركات النقدية تحفظ مبلغها في نفس السطر،
+ * وهو الرقم الذي يُراجَع فعلاً. الحالات والمرضى والمواعيد لا مبلغ لها فتبقى
+ * الخانة فارغة — وعمود الجدول بجانبها يقول ما الذي تغيّر.
+ */
+function movedAmount(row: { afterJson: string | null; beforeJson: string | null }) {
+  for (const raw of [row.afterJson, row.beforeJson]) {
+    if (!raw) continue;
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const amount = (parsed as { amount?: unknown }).amount;
+        if (typeof amount === "number" && Number.isFinite(amount)) return amount;
+      }
+    } catch {
+      // سطر قديم بصيغة غير متوقّعة — يبقى بلا مبلغ بدل أن تنهار الصفحة.
+    }
+  }
+  return null;
+}
 
 export default async function AuditPage({
   searchParams,
@@ -70,7 +110,7 @@ export default async function AuditPage({
       {/* فلاتر — نموذج GET بسيط بلا حالة على العميل. */}
       <form method="get" data-tour="audit-filters" className="flex flex-wrap items-end gap-2">
         <div className="space-y-1.5">
-          <label htmlFor="au-entity" className="text-muted-foreground text-xs">
+          <label htmlFor="au-entity" className="text-muted-foreground text-sm">
             الجدول
           </label>
           <NativeSelect
@@ -124,44 +164,49 @@ export default async function AuditPage({
                     <TableHead className="ps-(--card-spacing)">الوقت</TableHead>
                     <TableHead>الجدول</TableHead>
                     <TableHead>الإجراء</TableHead>
-                    <TableHead>المعرّف</TableHead>
+                    <TableHead className="text-end">المبلغ</TableHead>
                     <TableHead>الشهر</TableHead>
                     <TableHead className="pe-(--card-spacing)">ملاحظة</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {rows.map((r) => (
-                    <TableRow
-                      key={r.id}
-                      className={cn(r.hitClosedPeriod && "bg-amber-50 dark:bg-amber-950/20")}
-                    >
-                      <TableCell className="ps-(--card-spacing) whitespace-nowrap tabular-nums">
-                        <span dir="ltr">{formatStamp(r.at)}</span>
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap">
-                        {AUDIT_ENTITY_LABELS[r.entity] ?? r.entity}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={ACTION_VARIANT[r.action] ?? "outline"}>
-                          {AUDIT_ACTION_LABELS[r.action] ?? r.action}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="tabular-nums">{r.entityId}</TableCell>
-                      <TableCell className="whitespace-nowrap">
-                        {r.period ? (
-                          <span className="inline-flex items-center gap-1.5">
-                            {formatPeriodAr(r.period)}
-                            {r.hitClosedPeriod ? (
-                              <Badge variant="destructive">شهر مُقفل</Badge>
-                            ) : null}
-                          </span>
-                        ) : null}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground pe-(--card-spacing)">
-                        {r.note}
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {rows.map((r) => {
+                    const amount = movedAmount(r);
+                    return (
+                      <TableRow
+                        key={r.id}
+                        className={cn(r.hitClosedPeriod && "bg-amber-50 dark:bg-amber-950/20")}
+                      >
+                        <TableCell className="ps-(--card-spacing) whitespace-nowrap tabular-nums">
+                          <span dir="ltr">{formatStamp(r.at)}</span>
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap">
+                          {AUDIT_ENTITY_LABELS[r.entity] ?? r.entity}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={ACTION_VARIANT[r.action] ?? "outline"}>
+                            {AUDIT_ACTION_LABELS[r.action] ?? r.action}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="money text-end font-semibold">
+                          {amount === null ? null : formatIQD(amount)}
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap">
+                          {r.period ? (
+                            <span className="inline-flex items-center gap-1.5">
+                              {formatPeriodAr(r.period)}
+                              {r.hitClosedPeriod ? (
+                                <Badge variant="destructive">شهر مُقفل</Badge>
+                              ) : null}
+                            </span>
+                          ) : null}
+                        </TableCell>
+                        <TableCell className="pe-(--card-spacing)">
+                          {r.note ? (AUDIT_NOTE_LABELS[r.note] ?? r.note) : null}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>

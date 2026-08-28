@@ -18,6 +18,7 @@ import {
 import { NativeSelect } from "@/components/forms/native-select";
 import { SubmitButton } from "@/components/forms/submit-button";
 import { useActionToast } from "@/components/forms/use-action-toast";
+import { FormError } from "@/components/forms/form-error";
 import {
   bookAppointment,
   markAppointment,
@@ -90,9 +91,10 @@ export function BookAppointmentDialog({
               id="ap-phone"
               name="phone"
               type="tel"
-              inputMode="numeric"
+              inputMode="tel"
+              dir="ltr"
               autoComplete="off"
-              className="h-11"
+              className="h-11 text-start"
               placeholder="07XXXXXXXXX"
             />
           </div>
@@ -121,13 +123,20 @@ export function BookAppointmentDialog({
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="ap-note">ملاحظة</Label>
+            <Label htmlFor="ap-time">الوقت (اختياري)</Label>
+            <Input id="ap-time" name="apptTime" type="time" className="h-11" />
+            <p className="text-muted-foreground text-sm">
+              عند تحديد الوقت يُرتَّب الموعد حسبه في تقويم الأسبوع، وبدونه يظهر في
+              آخر قائمة يومه.
+            </p>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="ap-note">ملاحظة (اختياري)</Label>
             <Input id="ap-note" name="note" className="h-11" autoComplete="off" />
           </div>
 
-          {state.error ? (
-            <p className="text-destructive text-sm">{state.error}</p>
-          ) : null}
+          <FormError>{state.error}</FormError>
 
           <div className="flex flex-col-reverse gap-2 pt-1 sm:flex-row sm:justify-end">
             <DialogClose
@@ -170,7 +179,9 @@ function StatusForm({
     {},
   );
 
-  useActionToast(state, STATUS_DONE[status]);
+  // زر داخل صف جدول: لا مكان تحته لسطر خطأ، وبلا هذا كان الفشل يمرّ بلا أثر —
+  // الصف لا يتغيّر، والموظفة تضغط ثانية وثالثة.
+  useActionToast(state, STATUS_DONE[status], undefined, { toastError: true });
 
   return (
     <form action={formAction} className="contents">
@@ -273,9 +284,7 @@ function DeleteAppointment({
 
         <form action={formAction} className="flex flex-col gap-4">
           <input type="hidden" name="id" value={id} />
-          {state.error ? (
-            <p className="text-destructive text-sm">{state.error}</p>
-          ) : null}
+          <FormError>{state.error}</FormError>
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <DialogClose
               render={
@@ -434,9 +443,7 @@ function RebookDialog({ id, patientName }: { id: number; patientName: string }) 
               </Button>
             ))}
           </div>
-          {state.error ? (
-            <p className="text-destructive text-sm">{state.error}</p>
-          ) : null}
+          <FormError>{state.error}</FormError>
         </form>
       </DialogContent>
     </Dialog>

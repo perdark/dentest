@@ -17,6 +17,7 @@ import {
 import { NativeSelect } from "@/components/forms/native-select";
 import { SubmitButton } from "@/components/forms/submit-button";
 import { useActionToast } from "@/components/forms/use-action-toast";
+import { FormError } from "@/components/forms/form-error";
 import { formatIQD, parseAmount } from "@/lib/format";
 import { MoneySummary } from "@/components/forms/money-summary";
 import { CASE_STATUS_LABELS } from "@/lib/strings";
@@ -71,8 +72,19 @@ function EditDialog({ card }: { card: CardData }) {
     useCallback(() => setOpen(false), []),
   );
 
+  // بقية الحقول تعود إلى قيم البطاقة وحدها عند الإغلاق لأنها غير متحكَّم بها،
+  // أما السعر والخصم فكانا يحتفظان بتعديل مهجور: تُغلق النافذة بـ«إلغاء» ثم
+  // تُفتح فتُقرأ الأرقام المتروكة كأنها المحفوظة في البطاقة.
+  function handleOpenChange(next: boolean) {
+    setOpen(next);
+    if (!next) {
+      setPrice(String(card.listPrice));
+      setDiscount(String(card.discount));
+    }
+  }
+
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger
         render={
           <Button variant="outline" className="h-11">
@@ -111,7 +123,7 @@ function EditDialog({ card }: { card: CardData }) {
                 inputMode="numeric"
                 value={price}
                 onChange={(e) => setPrice(e.target.value)}
-                className="h-11"
+                className="h-11 text-base tabular-nums"
               />
             </div>
 
@@ -123,7 +135,7 @@ function EditDialog({ card }: { card: CardData }) {
                 inputMode="numeric"
                 value={discount}
                 onChange={(e) => setDiscount(e.target.value)}
-                className="h-11"
+                className="h-11 text-base tabular-nums"
               />
             </div>
 
@@ -136,16 +148,19 @@ function EditDialog({ card }: { card: CardData }) {
               </span>
             </div>
 
-            <MoneySummary
-              figures={[
-                { label: "المدفوع", amount: card.paid },
-                {
-                  label: "المتبقي بعد التعديل",
-                  amount: previewTotal - card.paid,
-                  emphasis: true,
-                },
-              ]}
-            />
+            {/* خلية شبكة كاملة العرض — نصف سطر لا يكفي رقمين ولافتتيهما. */}
+            <div className="sm:col-span-2">
+              <MoneySummary
+                figures={[
+                  { label: "المدفوع", amount: card.paid },
+                  {
+                    label: "المتبقي بعد التعديل",
+                    amount: previewTotal - card.paid,
+                    emphasis: true,
+                  },
+                ]}
+              />
+            </div>
 
             <div className="space-y-1.5">
               <Label htmlFor="ed-labCost">كلفة المختبر (د.ع)</Label>
@@ -154,7 +169,7 @@ function EditDialog({ card }: { card: CardData }) {
                 name="labCost"
                 inputMode="numeric"
                 defaultValue={String(card.labCost)}
-                className="h-11"
+                className="h-11 text-base tabular-nums"
               />
             </div>
 
@@ -173,16 +188,14 @@ function EditDialog({ card }: { card: CardData }) {
             </div>
           </div>
 
-          {state.error ? (
-            <p className="text-destructive text-sm">{state.error}</p>
-          ) : null}
+          <FormError>{state.error}</FormError>
 
           <div className="flex justify-end gap-2 pt-1">
             <Button
               type="button"
               variant="outline"
               className="h-11"
-              onClick={() => setOpen(false)}
+              onClick={() => handleOpenChange(false)}
             >
               إلغاء
             </Button>
@@ -221,8 +234,15 @@ function SessionDialog({
     }, []),
   );
 
+  // الإغلاق بلا حفظ يمسح المبلغ أيضاً: مبلغ جلسة متروك في الحقل يُقرأ عند
+  // الفتح التالي كأنه مبلغ الجلسة الجديدة.
+  function handleOpenChange(next: boolean) {
+    setOpen(next);
+    if (!next) setAmount("");
+  }
+
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger
         render={
           <Button className="h-11">
@@ -250,7 +270,7 @@ function SessionDialog({
               inputMode="numeric"
               placeholder="0"
               required
-              className="h-11"
+              className="h-11 text-base tabular-nums"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
             />
@@ -279,20 +299,18 @@ function SessionDialog({
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="ss-note">ملاحظة</Label>
-            <Input id="ss-note" name="note" className="h-11" />
+            <Label htmlFor="ss-note">ملاحظة (اختياري)</Label>
+            <Input id="ss-note" name="note" autoComplete="off" className="h-11" />
           </div>
 
-          {state.error ? (
-            <p className="text-destructive text-sm">{state.error}</p>
-          ) : null}
+          <FormError>{state.error}</FormError>
 
           <div className="flex justify-end gap-2 pt-1">
             <Button
               type="button"
               variant="outline"
               className="h-11"
-              onClick={() => setOpen(false)}
+              onClick={() => handleOpenChange(false)}
             >
               إلغاء
             </Button>

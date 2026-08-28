@@ -168,7 +168,16 @@ export const SETTLEMENT_STATUS_LABELS: Record<string, string> = {
   stale: "يحتاج تحديث",
 };
 
-/** كل مختبر فرعان — وكل قيد موسوم بفرعه. [قرار العيادة 2026-08-19] */
+/**
+ * الصورة داخل العيادة أم من خارجها — وصفٌ لا حساب. [قرار العيادة 2026-08-25]
+ * الاثنان دخل للعيادة، والتقسيم للمتابعة فقط.
+ */
+export const XRAY_PLACEMENT_LABELS: Record<string, string> = {
+  internal: "داخل",
+  external: "خارج",
+};
+
+/** كل مختبر فرعان — وكل تسجيل موسوم بفرعه. [قرار العيادة 2026-08-19] */
 export const LAB_BRANCH_LABELS: Record<string, string> = {
   fixed: "ثابت",
   mobile: "متحرك",

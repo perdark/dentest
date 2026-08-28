@@ -8,14 +8,19 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 /**
  * The one rule that makes الأشعة different from every other treatment: the
  * money is the clinic's. A doctor's collected total, work-done total and payout
- * must not move when an X-ray is billed and paid on their name — while the
- * cash, and the clinic's net, must.
+ * must not move when an X-ray is taken and paid for — while the cash, and the
+ * clinic's net, must.
  *
  * This is worth a test rather than a comment because nothing in the code says
  * "exclude X-rays" at the point where a payout is calculated: the exclusion is
  * structural (per-doctor sums ask for the three doctor buckets by name), so a
  * later change that starts summing buckets generically would silently begin
  * paying commission on X-ray income.
+ *
+ * Since 2026-08-25 a film is its own record (`xray_films`) with no patient and
+ * no doctor: it is a cash sale, paid in full on its date. Two things must hold
+ * together — the film's money reaches the clinic (income, cash on hand, net),
+ * and any legacy X-ray *case* recorded before that decision still reports.
  */
 
 const testDir = mkdtempSync(path.join(tmpdir(), "zuha-xray-"));
@@ -27,9 +32,11 @@ const DATE = "2026-08-12";
 let dbClient: typeof import("@/lib/db/client");
 let schema: typeof import("@/lib/db/schema");
 let computeSettlement: typeof import("@/lib/settlement")["computeSettlement"];
-let recordXray: typeof import("@/lib/mutations")["recordXray"];
+let recordXrayFilm: typeof import("@/lib/mutations")["recordXrayFilm"];
+let deleteXrayFilm: typeof import("@/lib/mutations")["deleteXrayFilm"];
 let createCaseWithPayment: typeof import("@/lib/mutations")["createCaseWithPayment"];
 let cashOnHand: typeof import("@/lib/server-utils")["cashOnHand"];
+let xrayFilmsForMonth: typeof import("@/lib/queries")["xrayFilmsForMonth"];
 
 let doctorId: number;
 let patientId: number;
@@ -42,10 +49,13 @@ before(async () => {
   const mutations = await import("@/lib/mutations");
   const settlement = await import("@/lib/settlement");
   const serverUtils = await import("@/lib/server-utils");
-  recordXray = mutations.recordXray;
+  const queries = await import("@/lib/queries");
+  recordXrayFilm = mutations.recordXrayFilm;
+  deleteXrayFilm = mutations.deleteXrayFilm;
   createCaseWithPayment = mutations.createCaseWithPayment;
   computeSettlement = settlement.computeSettlement;
   cashOnHand = serverUtils.cashOnHand;
+  xrayFilmsForMonth = queries.xrayFilmsForMonth;
 
   migrate(dbClient.db, { migrationsFolder: path.resolve("drizzle") });
   dbClient.db.insert(schema.settings).values({ id: 1, defaultCommissionPct: 50 }).run();
@@ -105,15 +115,12 @@ test("X-ray income stays out of every doctor figure and inside the clinic's", ()
   assert.equal(before.xrayIncome, 0);
   const cashBefore = cashOnHand();
 
-  // Same doctor, same month, paid in full: 15,000 of clinic money.
-  const result = recordXray({
-    patientId,
-    doctorId,
+  // Same month, paid in full: 15,000 of clinic money, belonging to nobody.
+  const result = recordXrayFilm({
+    filmDate: DATE,
     treatmentTypeId: xrayTypeId,
-    date: DATE,
-    listPrice: 15_000,
-    discount: 0,
-    paidNow: 15_000,
+    placement: "internal",
+    price: 15_000,
   });
   assert.equal(result.ok, true);
 
@@ -140,116 +147,109 @@ test("X-ray income stays out of every doctor figure and inside the clinic's", ()
   assert.equal(afterXray.clinicNet, before.clinicNet + 15_000);
 });
 
-test("an unpaid X-ray bills the patient without paying anyone a share", () => {
+test("an outside film is income exactly like an inside one", () => {
   const before = computeSettlement(PERIOD);
+  const cashBefore = cashOnHand();
 
-  const result = recordXray({
-    patientId,
-    doctorId,
-    treatmentTypeId: xrayTypeId,
-    date: DATE,
-    listPrice: 50_000,
-    discount: 10_000,
-    paidNow: 0,
-  });
-  assert.equal(result.ok, true);
-  if (!result.ok) return;
-  // Total is derived server-side from price − discount, never taken as given.
-  assert.equal(result.total, 40_000);
-  assert.equal(result.paymentId, null);
+  assert.equal(
+    recordXrayFilm({
+      filmDate: DATE,
+      treatmentTypeId: xrayTypeId,
+      placement: "external",
+      price: 25_000,
+    }).ok,
+    true,
+  );
 
   const after = computeSettlement(PERIOD);
-  assert.equal(after.xrayIncome, before.xrayIncome); // nothing collected yet
-  assert.equal(
-    after.doctors.find((d) => d.doctorId === doctorId)!.payout,
-    before.doctors.find((d) => d.doctorId === doctorId)!.payout,
-  );
+  assert.equal(after.xrayIncome, before.xrayIncome + 25_000);
+  assert.equal(cashOnHand(), cashBefore + 25_000);
+  // داخل/خارج وصفٌ لا حساب: الرقمان منفصلان في العرض ومجموعهما هو الدخل.
+  const month = xrayFilmsForMonth(PERIOD);
+  assert.equal(month.internal, 15_000);
+  assert.equal(month.external, 25_000);
+  assert.equal(month.income, 40_000);
+  assert.equal(month.count, 2);
+  // ولا حصة لأحد منه.
+  assert.equal(after.totalPayout, before.totalPayout);
 });
 
 test("the X-ray register refuses to bill dental work", () => {
-  const result = recordXray({
-    patientId,
-    doctorId,
+  const result = recordXrayFilm({
+    filmDate: DATE,
     treatmentTypeId: normalTypeId, // a filling, not an X-ray
-    date: DATE,
-    listPrice: 100_000,
-    discount: 0,
-    paidNow: 100_000,
+    placement: "internal",
+    price: 100_000,
   });
   assert.equal(result.ok, false);
   if (result.ok) return;
-  assert.equal(result.reason, "not_xray");
+  assert.equal(result.reason, "not_xray_type");
+
+  // ولا تُقبل الأرقام المستحيلة: تاريخ غير صالح أو سعر سالب.
+  assert.equal(
+    recordXrayFilm({
+      filmDate: "2026-13-40",
+      treatmentTypeId: xrayTypeId,
+      placement: "internal",
+      price: 10_000,
+    }).ok,
+    false,
+  );
+  assert.equal(
+    recordXrayFilm({
+      filmDate: DATE,
+      treatmentTypeId: xrayTypeId,
+      placement: "internal",
+      price: -1,
+    }).ok,
+    false,
+  );
 });
 
-test("a paid X-ray refuses deletion; an unpaid one is removed cleanly", async () => {
-  const mutations = await import("@/lib/mutations");
-
-  // Paid film: deleting it here would erase cash that was actually received.
-  const paidFilm = mutations.recordXray({
-    patientId,
-    doctorId,
+test("deleting a film takes its money back out of the clinic's books", () => {
+  const typo = recordXrayFilm({
+    filmDate: DATE,
     treatmentTypeId: xrayTypeId,
-    date: DATE,
-    listPrice: 15_000,
-    discount: 0,
-    paidNow: 15_000,
-  });
-  assert.equal(paidFilm.ok, true);
-  if (!paidFilm.ok) return;
-  const refused = mutations.removeXray(paidFilm.caseId);
-  assert.equal(refused.ok, false);
-  if (refused.ok) return;
-  assert.equal(refused.reason, "has_payments");
-
-  // Unpaid film: a plain typo, removed with the row kept in the audit log.
-  const typo = mutations.recordXray({
-    patientId,
-    doctorId,
-    treatmentTypeId: xrayTypeId,
-    date: DATE,
-    listPrice: 15_000,
-    discount: 0,
-    paidNow: 0,
+    placement: "internal",
+    price: 30_000,
   });
   assert.equal(typo.ok, true);
   if (!typo.ok) return;
+
   const before = computeSettlement(PERIOD);
-  assert.equal(mutations.removeXray(typo.caseId).ok, true);
-  assert.equal(mutations.removeXray(typo.caseId).ok, false); // already gone
+  const cashBefore = cashOnHand();
+  assert.equal(deleteXrayFilm(typo.filmId), true);
+  assert.equal(deleteXrayFilm(typo.filmId), false); // already gone
 
-  // Removing a film changes no doctor's money.
   const after = computeSettlement(PERIOD);
+  assert.equal(after.xrayIncome, before.xrayIncome - 30_000);
+  assert.equal(cashOnHand(), cashBefore - 30_000);
+  // وحذف الفيلم لا يمسّ مال أي طبيب.
   assert.equal(after.totalPayout, before.totalPayout);
-  assert.equal(after.xrayIncome, before.xrayIncome);
-
-  // Dental work can never be deleted through the X-ray door.
-  const notXray = mutations.removeXray(
-    mutations.createCaseWithPayment({
-      patientId,
-      doctorId,
-      treatmentTypeId: normalTypeId,
-      openedDate: DATE,
-      listPrice: 10_000,
-      discount: 0,
-      totalPrice: 10_000,
-    }).caseId,
-  );
-  assert.equal(notXray.ok, false);
-  if (notXray.ok) return;
-  assert.equal(notXray.reason, "not_xray");
 });
 
-test("an X-ray cannot be saved as paid for more than it costs", () => {
-  const result = recordXray({
+test("a legacy X-ray case recorded before 2026-08-25 still reports as clinic income", () => {
+  const before = computeSettlement(PERIOD);
+
+  // الصفوف القديمة كانت «حالة» على مريض بدفعة. لا شيء ينشئها بعد اليوم، لكن
+  // قراءتها يجب أن تبقى صحيحة وإلا نقص دخل شهرٍ فيه الاثنان.
+  createCaseWithPayment({
     patientId,
     doctorId,
     treatmentTypeId: xrayTypeId,
-    date: DATE,
-    listPrice: 15_000,
+    openedDate: DATE,
+    listPrice: 20_000,
     discount: 0,
-    paidNow: 20_000,
+    totalPrice: 20_000,
+    firstPayment: { amount: 20_000, kind: "session" },
   });
-  assert.equal(result.ok, false);
-  if (result.ok) return;
-  assert.equal(result.reason, "paid_exceeds_total");
+
+  const after = computeSettlement(PERIOD);
+  assert.equal(after.xrayIncome, before.xrayIncome + 20_000);
+  // ولا تدخل حصة الطبيب الذي كانت مسجّلة باسمه.
+  assert.equal(after.totalPayout, before.totalPayout);
+  assert.equal(
+    after.doctors.find((d) => d.doctorId === doctorId)!.collectedTotal,
+    before.doctors.find((d) => d.doctorId === doctorId)!.collectedTotal,
+  );
 });

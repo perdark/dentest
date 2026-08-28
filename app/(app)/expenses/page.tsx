@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { ChevronRight, ChevronLeft, Receipt } from "lucide-react";
 import { expensesForMonth } from "@/lib/queries";
+import { cashOnHand } from "@/lib/server-utils";
 import { formatIQD } from "@/lib/format";
-import { formatDateAr, formatPeriodAr, todayISO, currentPeriod, shiftPeriod } from "@/lib/dates";
+import { formatDateShort, formatPeriodAr, todayISO, currentPeriod, shiftPeriod } from "@/lib/dates";
 import {
   EXPENSE_CATEGORIES,
   EXPENSE_CATEGORY_LABELS,
@@ -82,7 +83,7 @@ export default async function ExpensesPage({
       </section>
 
       <div data-tour="expenses-form">
-        <ExpenseForm today={todayISO()} />
+        <ExpenseForm today={todayISO()} cashOnHand={cashOnHand()} />
       </div>
 
       {/* جدول المصروفات */}
@@ -107,13 +108,17 @@ export default async function ExpensesPage({
                 {rows.map((r) => (
                   <TableRow key={r.id}>
                     <TableCell className="whitespace-nowrap">
-                      {formatDateAr(r.expenseDate)}
+                      <span dir="ltr" className="tabular-nums">
+                        {formatDateShort(r.expenseDate)}
+                      </span>
                     </TableCell>
                     <TableCell className="font-medium">
                       {EXPENSE_CATEGORY_LABELS[r.category] ?? r.category}
                     </TableCell>
-                    <TableCell className="money text-end">{formatIQD(r.amount)}</TableCell>
-                    <TableCell className="text-muted-foreground max-w-48 truncate whitespace-normal">
+                    <TableCell className="money text-end text-lg font-bold">
+                      {formatIQD(r.amount)}
+                    </TableCell>
+                    <TableCell title={r.note ?? undefined} className="max-w-64 truncate">
                       {r.note}
                     </TableCell>
                     <TableCell className="text-end">

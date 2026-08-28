@@ -4,8 +4,9 @@ import { useActionState, useCallback, useRef, useState } from "react";
 import { addOrthoPayment, type OrthoFormState } from "@/lib/actions/ortho";
 import { SubmitButton } from "@/components/forms/submit-button";
 import { useActionToast } from "@/components/forms/use-action-toast";
+import { FormError } from "@/components/forms/form-error";
 import { MoneySummary } from "@/components/forms/money-summary";
-import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { parseAmount } from "@/lib/format";
 
@@ -30,7 +31,7 @@ export function OrthoPaymentForm({
 
   useActionToast(
     state,
-    "تمت إضافة الدفعة بنجاح",
+    "تمت إضافة الجلسة بنجاح",
     useCallback(() => {
       formRef.current?.reset();
       setAmount("");
@@ -40,7 +41,7 @@ export function OrthoPaymentForm({
   if (!canCollect) {
     return (
       <p className="text-muted-foreground py-4 text-center text-sm">
-        لا يمكن إضافة دفعة جلسة لهذه الحالة.
+        الحالة مغلقة — أعد فتحها من الأعلى لإضافة جلسة جديدة.
       </p>
     );
   }
@@ -51,13 +52,13 @@ export function OrthoPaymentForm({
 
       <FieldGroup>
         <Field data-invalid={Boolean(state.error)}>
-          <FieldLabel htmlFor={`ortho-amount-${caseId}`}>المبلغ</FieldLabel>
+          <FieldLabel htmlFor={`ortho-amount-${caseId}`}>مبلغ الجلسة</FieldLabel>
           <Input
             id={`ortho-amount-${caseId}`}
             name="amount"
             inputMode="numeric"
             required
-            className="h-11"
+            className="h-11 text-base tabular-nums"
             placeholder="مثال: 100,000"
             aria-invalid={Boolean(state.error)}
             value={amount}
@@ -96,10 +97,10 @@ export function OrthoPaymentForm({
           />
         </Field>
 
-        <FieldError>{state.error}</FieldError>
+        <FormError>{state.error}</FormError>
       </FieldGroup>
 
-      <SubmitButton className="h-11 w-full">إضافة الدفعة</SubmitButton>
+      <SubmitButton className="h-11 w-full">حفظ الجلسة</SubmitButton>
     </form>
   );
 }

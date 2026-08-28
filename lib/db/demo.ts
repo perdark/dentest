@@ -29,7 +29,7 @@ import {
   createPatient,
   recordCasePayment,
   recordCashMovement,
-  recordXray,
+  recordXrayFilm,
   setAppointmentStatus,
   updateCaseMeta,
   updateSettings,
@@ -114,6 +114,7 @@ export interface DemoResult {
   appointments: number;
   expenses: number;
   labEntries: number;
+  xrayFilms: number;
 }
 
 /** True when the database still holds no patients — a demo fill is safe. */
@@ -129,6 +130,7 @@ export function fillDemoData(): DemoResult {
     appointments: 0,
     expenses: 0,
     labEntries: 0,
+    xrayFilms: 0,
   };
 
   const doctorRows = db.select().from(doctors).orderBy(doctors.sortOrder).all();
@@ -313,35 +315,26 @@ export function fillDemoData(): DemoResult {
   }
 
   // ── X-rays ────────────────────────────────────────────────────────────────
-  // Nearly always paid on the spot at the desk, which is why the register is
-  // mostly a list of settled rows with the occasional balance left on it. [D9]
+  // بيع نقدي في لحظته: نوع الصورة، وداخل أم خارج، وسعرها — بلا مريض وبلا دَين.
+  // [قرار العيادة 2026-08-25][D9]
   const films = [
-    { type: typeOf("xray_panoramic"), price: 15_000, note: "بانوراما قبل الزراعة" },
-    { type: typeOf("xray_periapical"), price: 5_000, note: "أشعة على الضرس العلوي" },
-    { type: typeOf("xray_cbct"), price: 50_000, note: "مسح ثلاثي الأبعاد للفك السفلي" },
-    { type: typeOf("xray_ceph"), price: 20_000, note: "سيفالومتري لخطة التقويم" },
+    { type: typeOf("xray_panoramic"), price: 15_000 },
+    { type: typeOf("xray_periapical"), price: 5_000 },
+    { type: typeOf("xray_cbct"), price: 50_000 },
+    { type: typeOf("xray_ceph"), price: 20_000 },
   ] as const;
 
   for (let i = 0; i < 26; i++) {
     // CBCT and cephalometric are the uncommon ones; a plain film is the norm.
     const film = rand() < 0.75 ? films[rand() < 0.6 ? 0 : 1]! : pick(films);
-    const discount = rand() < 0.1 ? 5_000 : 0;
-    const total = film.price - discount;
-    const result_ = recordXray({
-      patientId: takePatient(),
-      doctorId: pick(doctorRows).id,
+    // الأكثر داخل العيادة، وبعضها يأتي من خارجها.
+    const result_ = recordXrayFilm({
+      filmDate: isoDaysAgo(between(0, 89)),
       treatmentTypeId: film.type.id,
-      date: isoDaysAgo(between(0, 89)),
-      listPrice: film.price,
-      discount,
-      // One in eight is added to the patient's account instead of paid at once.
-      paidNow: rand() < 0.875 ? total : 0,
-      note: film.note,
+      placement: rand() < 0.8 ? "internal" : "external",
+      price: film.price,
     });
-    if (result_.ok) {
-      result.cases++;
-      if (result_.paymentId !== null) result.payments++;
-    }
+    if (result_.ok) result.xrayFilms++;
   }
 
   // One refund, because the clinic does issue them and the settlement has to be
@@ -421,7 +414,7 @@ export function fillDemoData(): DemoResult {
 
   // ── lab entries (مستحقات المختبر) ─────────────────────────────────────────
   // متابعة فقط — لا تدخل حصة طبيب ولا صندوق العيادة. تُملأ هنا لأن شاشة
-  // «الأطباء» بلا قيود تبدو كأنها لا تعمل، والموظف يتدرّب على شاشة فارغة.
+  // «الأطباء» بلا تسجيلات تبدو كأنها لا تعمل، والموظف يتدرّب على شاشة فارغة.
   const LAB_NAMES = ["دوبرا", "النخبة", "الرافدين", "المتحدة", "بغداد"];
   doctorRows.forEach((doc, i) => {
     db.update(doctors)

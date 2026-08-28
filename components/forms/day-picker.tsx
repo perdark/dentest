@@ -30,10 +30,12 @@ export function DayPicker({
   basePath,
   date,
   label = "اختر التاريخ",
+  searchParams,
 }: {
   basePath: string;
   date: string;
   label?: string;
+  searchParams?: Record<string, string>;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -53,7 +55,8 @@ export function DayPicker({
       onChange={(e) => {
         const next = e.target.value;
         if (!isValidISODate(next) || next === date) return;
-        startTransition(() => router.push(`${basePath}?date=${next}`));
+        const query = new URLSearchParams({ date: next, ...searchParams });
+        startTransition(() => router.push(`${basePath}?${query.toString()}`));
       }}
     />
   );

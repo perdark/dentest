@@ -19,7 +19,7 @@ test("a daily entry with a part payment reaches the monthly settlement", async (
 }) => {
   await page.goto("/daily");
 
-  await page.getByRole("button", { name: "إضافة قيد" }).click();
+  await page.getByRole("button", { name: "تسجيل جديد" }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
 
@@ -38,7 +38,7 @@ test("a daily entry with a part payment reaches the monthly settlement", async (
   await dialog.locator("#nc-price").fill(LIST_PRICE);
   await dialog.locator("#nc-paid").fill(PAID_NOW);
 
-  await dialog.getByRole("button", { name: "حفظ القيد" }).click();
+  await dialog.getByRole("button", { name: "حفظ التسجيل" }).click();
 
   // useActionToast closes the dialog only after the action succeeds.
   await expect(dialog).toBeHidden();

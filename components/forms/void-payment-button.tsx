@@ -13,12 +13,13 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { useActionToast } from "@/components/forms/use-action-toast";
+import { FormError } from "@/components/forms/form-error";
 import { formatIQD } from "@/lib/format";
 import { formatDateAr } from "@/lib/dates";
 import { voidPayment, type VoidState } from "@/lib/actions/payments";
 
 /**
- * إلغاء قيد دفعة خاطئ. يُستخدم لتصحيح خطأ الإدخال فقط — أما إعادة المال
+ * إلغاء تسجيل دفعة خاطئ. يُستخدم لتصحيح خطأ الإدخال فقط — أما إعادة المال
  * للمريض فعلاً فتُسجَّل بنوع «استرجاع». [A1]
  */
 export function VoidPaymentButton({
@@ -40,7 +41,7 @@ export function VoidPaymentButton({
 
   useActionToast(
     state,
-    "تم إلغاء القيد",
+    "تم إلغاء التسجيل",
     useCallback(() => setOpen(false), []),
   );
 
@@ -52,7 +53,7 @@ export function VoidPaymentButton({
             variant="ghost"
             size="icon-sm"
             className="text-muted-foreground hover:text-destructive size-11"
-            aria-label="إلغاء القيد"
+            aria-label="إلغاء التسجيل"
           >
             <Trash2 className="size-4" />
           </Button>
@@ -60,22 +61,20 @@ export function VoidPaymentButton({
       />
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>إلغاء قيد خاطئ</DialogTitle>
+          <DialogTitle>إلغاء تسجيل خاطئ</DialogTitle>
           <DialogDescription>
-            سيُحذف قيد <span className="money">{formatIQD(amount)}</span>
+            سيُحذف تسجيل <span className="money">{formatIQD(amount)}</span>
             {patientName ? ` الخاص بـ ${patientName}` : ""} بتاريخ{" "}
             {formatDateAr(paidDate)}. يُستخدم هذا لتصحيح خطأ إدخال فقط — إذا
             أعدتِ المبلغ للمريض فعلاً فسجّليه بنوع «استرجاع» بدلاً من ذلك.
-            القيد يبقى محفوظاً في سجل التعديلات.
+            التسجيل يبقى محفوظاً في سجل التعديلات.
           </DialogDescription>
         </DialogHeader>
 
         <form action={formAction} className="flex flex-col gap-4">
           <input type="hidden" name="paymentId" value={paymentId} />
 
-          {state.error ? (
-            <p className="text-destructive text-sm">{state.error}</p>
-          ) : null}
+          <FormError>{state.error}</FormError>
 
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <DialogClose

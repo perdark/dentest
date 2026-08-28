@@ -1,7 +1,8 @@
-import { PhoneCall } from "lucide-react";
+import { PhoneCall, PhoneOff } from "lucide-react";
 import { debtsList } from "@/lib/queries";
 import { formatIQD } from "@/lib/format";
-import { formatDateAr, todayISO } from "@/lib/dates";
+import { formatDateShortY, todayISO } from "@/lib/dates";
+import { EmptyValue } from "@/components/ui/empty-value";
 import {
   Card,
   CardContent,
@@ -60,9 +61,9 @@ export default function DebtsPage() {
                 <TableRow>
                   <TableHead>المريض</TableHead>
                   <TableHead>الهاتف</TableHead>
-                  <TableHead>العلاج</TableHead>
-                  <TableHead>الطبيب</TableHead>
-                  <TableHead>آخر دفعة</TableHead>
+                  <TableHead className="hidden sm:table-cell">العلاج</TableHead>
+                  <TableHead className="hidden md:table-cell">الطبيب</TableHead>
+                  <TableHead className="hidden lg:table-cell">آخر دفعة</TableHead>
                   <TableHead className="text-end">المتبقي</TableHead>
                   <TableHead className="text-end">إجراء</TableHead>
                 </TableRow>
@@ -77,28 +78,32 @@ export default function DebtsPage() {
                         <a
                           href={`tel:${r.phone}`}
                           dir="ltr"
-                          className="text-primary inline-flex min-h-11 items-center underline-offset-4 hover:underline"
+                          className="text-primary money inline-flex min-h-11 items-center underline-offset-4 hover:underline"
                         >
                           {r.phone}
                         </a>
                       ) : (
-                        <span className="text-muted-foreground/60 text-xs">
-                          بلا رقم
+                        /* شاشة التحصيل كلها اتصال: غياب الرقم خبرٌ يُقرأ، لا
+                           فراغ باهت — أيقونة مع نص، بحجم بقية الخانات. */
+                        <span className="inline-flex min-h-11 items-center gap-1.5">
+                          <PhoneOff className="text-muted-foreground size-4 shrink-0" />
+                          <EmptyValue>بلا رقم هاتف</EmptyValue>
                         </span>
                       )}
                     </TableCell>
-                    <TableCell>{r.treatment}</TableCell>
-                    <TableCell>{r.doctorName}</TableCell>
-                    <TableCell>
+                    <TableCell className="hidden sm:table-cell">{r.treatment}</TableCell>
+                    <TableCell className="hidden md:table-cell">{r.doctorName}</TableCell>
+                    <TableCell className="hidden lg:table-cell">
                       {r.lastPaymentDate ? (
-                        formatDateAr(r.lastPaymentDate)
-                      ) : (
-                        <span className="text-muted-foreground/60 text-xs">
-                          لا توجد دفعات
+                        <span dir="ltr" className="tabular-nums">
+                          {formatDateShortY(r.lastPaymentDate)}
                         </span>
+                      ) : (
+                        <EmptyValue>لم تُدفع أي دفعة</EmptyValue>
                       )}
                     </TableCell>
-                    <TableCell className="money text-end font-semibold">
+                    {/* الرقم الذي تُقرأ الشاشة من أجله. */}
+                    <TableCell className="money text-end text-lg font-bold">
                       {formatIQD(r.remaining)}
                     </TableCell>
                     <TableCell className="text-end">

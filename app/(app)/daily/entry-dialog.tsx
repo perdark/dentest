@@ -18,6 +18,7 @@ import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/forms/native-select";
 import { SubmitButton } from "@/components/forms/submit-button";
 import { useActionToast } from "@/components/forms/use-action-toast";
+import { FormError } from "@/components/forms/form-error";
 import { MoneySummary } from "@/components/forms/money-summary";
 import { PAYMENT_KIND_LABELS } from "@/lib/strings";
 import { parseAmount } from "@/lib/format";
@@ -51,6 +52,10 @@ export function EntryDialog({
 }) {
   const [open, setOpen] = useState(false);
   const router = useRouter();
+  // بدون هذا يقع تركيز الفتح على شريط التبويبين — أول عنصر قابل للتبويب داخل
+  // النافذة — فيبدأ إدخال كل تسجيل بضغطة Tab زائدة، وأسهم لوحة المفاتيح تبدّل
+  // التبويب بدل أن تكتب. الاسم هو أول ما يُكتب، فهو أول ما يُركَّز عليه.
+  const nameRef = useRef<HTMLInputElement>(null);
 
   const handleSuccess = useCallback(() => {
     setOpen(false);
@@ -61,11 +66,11 @@ export function EntryDialog({
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger render={<Button className="h-11 gap-1.5" />}>
         <Plus className="size-4" />
-        إضافة قيد
+        تسجيل جديد
       </DialogTrigger>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md" initialFocus={nameRef}>
         <DialogHeader>
-          <DialogTitle>إضافة قيد جديد</DialogTitle>
+          <DialogTitle>تسجيل جديد</DialogTitle>
           {/* التبويبان يتشابهان في العين ويختلفان تماماً في الأثر: أحدهما يفتح
               حساباً جديداً والآخر يُنقص رصيداً قائماً. الفرق مكتوب، لا مُستنتَج. */}
           <DialogDescription>
@@ -85,6 +90,7 @@ export function EntryDialog({
               doctors={doctors}
               treatments={treatments}
               date={date}
+              nameRef={nameRef}
               onSuccess={handleSuccess}
             />
           </TabsContent>
@@ -109,11 +115,13 @@ function NewCaseForm({
   doctors,
   treatments,
   date,
+  nameRef,
   onSuccess,
 }: {
   doctors: DoctorOpt[];
   treatments: TreatmentOpt[];
   date: string;
+  nameRef?: React.RefObject<HTMLInputElement | null>;
   onSuccess: () => void;
 }) {
   const [state, formAction] = useActionState<VisitFormState, FormData>(
@@ -137,6 +145,7 @@ function NewCaseForm({
         <Label htmlFor="nc-name">اسم المريض</Label>
         <Input
           id="nc-name"
+          ref={nameRef}
           name="patientName"
           required
           autoComplete="off"
@@ -147,13 +156,16 @@ function NewCaseForm({
 
       <div className="space-y-2">
         <Label htmlFor="nc-phone">رقم الهاتف (اختياري)</Label>
+        {/* الأرقام تُكتب وتُقرأ من اليسار حتى داخل صفحة عربية، ولوحة الهاتف
+            تفتح على الأرقام مباشرة. */}
         <Input
           id="nc-phone"
           name="phone"
           type="tel"
-          inputMode="numeric"
+          inputMode="tel"
+          dir="ltr"
           autoComplete="off"
-          className="h-11"
+          className="h-11 text-start"
           placeholder="07XXXXXXXXX"
         />
       </div>
@@ -196,11 +208,13 @@ function NewCaseForm({
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-2">
           <Label htmlFor="nc-price">السعر</Label>
+          {/* حقول المال تُقرأ بحجم النص الكامل: `Input` يهبط إلى 14px على
+              الشاشات الكبيرة، وهذا رقم يُدقَّق لا رقم يُتصفَّح. */}
           <Input
             id="nc-price"
             name="price"
             inputMode="numeric"
-            className="h-11"
+            className="h-11 text-base tabular-nums"
             placeholder="0"
             value={price}
             onChange={(e) => setPrice(e.target.value)}
@@ -212,7 +226,7 @@ function NewCaseForm({
             id="nc-discount"
             name="discount"
             inputMode="numeric"
-            className="h-11"
+            className="h-11 text-base tabular-nums"
             value={discount}
             onChange={(e) => setDiscount(e.target.value)}
           />
@@ -226,7 +240,7 @@ function NewCaseForm({
             id="nc-paid"
             name="paidNow"
             inputMode="numeric"
-            className="h-11"
+            className="h-11 text-base tabular-nums"
             value={paidNow}
             onChange={(e) => setPaidNow(e.target.value)}
           />
@@ -247,9 +261,9 @@ function NewCaseForm({
         />
       ) : null}
 
-      {state.error ? <p className="text-destructive text-sm">{state.error}</p> : null}
+      <FormError>{state.error}</FormError>
 
-      <SubmitButton className="h-11 w-full text-base">حفظ القيد</SubmitButton>
+      <SubmitButton className="h-11 w-full text-base">حفظ التسجيل</SubmitButton>
     </form>
   );
 }
@@ -320,6 +334,8 @@ function PaymentForm({
     <form action={formAction} className="space-y-3 pt-3">
       <div className="space-y-2">
         <Label htmlFor="pv-search">ابحث عن الحالة</Label>
+        {/* البحث يعيش داخل النموذج، فـ Enter فيه كان يُرسل الدفعة نفسها — قبل
+            اختيار الحالة وقبل كتابة المبلغ. البحث يبحث؛ الحفظ زرّه أدناه. */}
         <Input
           id="pv-search"
           type="search"
@@ -329,9 +345,12 @@ function PaymentForm({
           placeholder="اسم المريض أو رقم الهاتف"
           value={query}
           onChange={(e) => runSearch(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") e.preventDefault();
+          }}
         />
         {truncated ? (
-          <p className="text-muted-foreground text-xs">
+          <p className="text-muted-foreground text-sm">
             تُعرض أحدث {openCases.length} حالة من أصل {totalCollectable} — ابحث
             بالاسم للوصول إلى البقية.
           </p>
@@ -366,7 +385,7 @@ function PaymentForm({
           id="pv-amount"
           name="amount"
           inputMode="numeric"
-          className="h-11"
+          className="h-11 text-base tabular-nums"
           placeholder="0"
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
@@ -402,7 +421,7 @@ function PaymentForm({
         <Input id="pv-date" name="date" type="date" className="h-11" defaultValue={date} />
       </div>
 
-      {state.error ? <p className="text-destructive text-sm">{state.error}</p> : null}
+      <FormError>{state.error}</FormError>
 
       <SubmitButton className="h-11 w-full text-base" disabled={results.length === 0}>
         حفظ الدفعة

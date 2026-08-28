@@ -1,11 +1,12 @@
 "use client";
 
-import { useActionState, useEffect, useRef } from "react";
-import { toast } from "sonner";
+import { useActionState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { SubmitButton } from "@/components/forms/submit-button";
+import { useActionToast } from "@/components/forms/use-action-toast";
+import { FormError } from "@/components/forms/form-error";
 import { updateOrtho, type OrthoFormState } from "@/lib/actions/ortho";
 
 export function OrthoMetaForm({
@@ -23,13 +24,9 @@ export function OrthoMetaForm({
     updateOrtho,
     {},
   );
-  const seen = useRef<OrthoFormState | null>(null);
-
-  useEffect(() => {
-    if (state === seen.current) return;
-    seen.current = state;
-    if (state.ok) toast.success("تم حفظ الموعد والملاحظة بنجاح");
-  }, [state]);
+  // هذا النموذج كان يكرّر منطق `useActionToast` بيده. نسخة واحدة من القاعدة
+  // تعني أن أي تصحيح فيها يصل كل شاشة، لا الشاشات التي تذكّرنا بها.
+  useActionToast(state, "تم حفظ الموعد والملاحظة بنجاح");
 
   return (
     <form action={formAction} className="space-y-4">
@@ -44,7 +41,7 @@ export function OrthoMetaForm({
           defaultValue={nextAppointment ?? ""}
           className="h-11"
         />
-        <p className="text-muted-foreground text-xs">اتركه فارغًا لإلغاء الموعد.</p>
+        <p className="text-muted-foreground text-sm">اتركه فارغًا لإلغاء الموعد.</p>
       </div>
 
       <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-lg border border-input px-3">
@@ -68,11 +65,7 @@ export function OrthoMetaForm({
         />
       </div>
 
-      {state.error ? (
-        <p role="alert" className="text-destructive text-sm">
-          {state.error}
-        </p>
-      ) : null}
+      <FormError>{state.error}</FormError>
 
       <SubmitButton className="h-11 w-full">حفظ التحديثات</SubmitButton>
     </form>

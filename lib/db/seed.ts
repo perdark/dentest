@@ -21,8 +21,7 @@ const DEFAULT_PIN = "1234";
 const DOCTORS = [
   { name: "د. عدي", isOwner: true, doesOrtho: false, commissionPct: null, sortOrder: 1 },
   { name: "د. علي قاسم", isOwner: false, doesOrtho: false, commissionPct: null, sortOrder: 2 },
-  { name: "د. دوبرا", isOwner: false, doesOrtho: false, commissionPct: null, sortOrder: 3 },
-  { name: "د. نور", isOwner: false, doesOrtho: false, commissionPct: null, sortOrder: 4 },
+  { name: "د. علي دوبرا", isOwner: false, doesOrtho: false, commissionPct: null, sortOrder: 3 },
   { name: "د. زهرة", isOwner: false, doesOrtho: true, commissionPct: null, sortOrder: 5 },
 ];
 

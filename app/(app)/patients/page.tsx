@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Phone, Search, Users } from "lucide-react";
+import { Phone, PhoneOff, Search, Users } from "lucide-react";
 import { listDoctors, patientsList } from "@/lib/queries";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -131,7 +131,7 @@ export default async function PatientsPage({
                   <TableCell>
                     <Link
                       href={`/patients/${p.id}`}
-                      className="text-primary font-medium hover:underline"
+                      className="text-primary inline-flex min-h-11 items-center font-medium underline-offset-4 hover:underline"
                     >
                       {p.fullName}
                     </Link>
@@ -142,13 +142,16 @@ export default async function PatientsPage({
                       <a
                         href={`tel:${p.phone}`}
                         dir="ltr"
-                        className="text-primary inline-flex items-center gap-1.5 hover:underline"
+                        className="text-primary inline-flex min-h-11 items-center gap-1.5 underline-offset-4 hover:underline"
                       >
-                        <Phone className="size-3.5" />
+                        <Phone className="size-4 shrink-0" />
                         <span className="money">{p.phone}</span>
                       </a>
                     ) : (
-                      <EmptyValue>بلا رقم</EmptyValue>
+                      <span className="inline-flex min-h-11 items-center gap-1.5">
+                        <PhoneOff className="text-muted-foreground size-4 shrink-0" />
+                        <EmptyValue>بلا رقم هاتف</EmptyValue>
+                      </span>
                     )}
                   </TableCell>
                 </TableRow>

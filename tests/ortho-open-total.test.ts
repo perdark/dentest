@@ -29,6 +29,7 @@ const DATE = "2026-08-12";
 let dbClient: typeof import("@/lib/db/client");
 let schema: typeof import("@/lib/db/schema");
 let createCaseWithPayment: typeof import("@/lib/mutations")["createCaseWithPayment"];
+let updateCaseMeta: typeof import("@/lib/mutations")["updateCaseMeta"];
 let recordCasePayment: typeof import("@/lib/mutations")["recordCasePayment"];
 let caseWithDetails: typeof import("@/lib/queries")["caseWithDetails"];
 let debtsList: typeof import("@/lib/queries")["debtsList"];
@@ -50,6 +51,7 @@ before(async () => {
   const mutations = await import("@/lib/mutations");
   const queries = await import("@/lib/queries");
   createCaseWithPayment = mutations.createCaseWithPayment;
+  updateCaseMeta = mutations.updateCaseMeta;
   recordCasePayment = mutations.recordCasePayment;
   caseWithDetails = queries.caseWithDetails;
   debtsList = queries.debtsList;
@@ -232,4 +234,109 @@ test("ordinary treatment still refuses a payment above its remaining balance", (
   // العلاج العادي غير المكتمل يبقى ديناً على المريض كما كان.
   assert.ok(debtsList().map((r) => r.id).includes(normalCaseId));
   assert.equal(dashboardStats().outstanding, 40_000);
+});
+
+/**
+ * المقدمة تُحدَّد ثم تُسدَّد على دفعات — قرار العيادة 2026-08-25.
+ *
+ * العيادة تتفق مع المريض على مقدمة ٢٠٠ ألف وتقبض منها ٥٠ في اليوم نفسه. الرقمان
+ * مختلفان: المتفق عليه محفوظ على الحالة، والمقبوض مجموع قيود «المقدمة».
+ *
+ * الاختبار يحرس الحدّ الذي يفصل المقدمة عن الجلسة: المقدمة سقفها ما اتُّفق عليه
+ * (وإلا صارت الجلسات تُسجَّل مقدمةً بلا معنى)، والجلسات تبقى بلا سقف كما هي.
+ */
+test("an agreed down payment is collected in instalments and capped by the agreement", () => {
+  const caseId = createCaseWithPayment({
+    patientId,
+    doctorId,
+    treatmentTypeId: orthoTypeId,
+    openedDate: DATE,
+    listPrice: 0,
+    discount: 0,
+    totalPrice: 0,
+    downPaymentAgreed: 200_000,
+    firstPayment: { amount: 50_000, kind: "down_payment" },
+  }).caseId;
+
+  // ١٥٠ ألفاً بقيت من المقدمة — دينار واحد فوقها يُرفض.
+  const tooMuch = recordCasePayment({
+    caseId,
+    amount: 150_001,
+    kind: "down_payment",
+    paidDate: DATE,
+    expectedCourse: "ortho",
+  });
+  assert.equal(tooMuch.ok, false);
+  assert.equal(tooMuch.ok === false && tooMuch.reason, "exceeds_down_payment");
+
+  const partial = recordCasePayment({
+    caseId,
+    amount: 100_000,
+    kind: "down_payment",
+    paidDate: DATE,
+    expectedCourse: "ortho",
+  });
+  assert.equal(partial.ok, true);
+
+  // الجلسات لا يحدّها شيء، ولو لم تكتمل المقدمة بعد.
+  const session = recordCasePayment({
+    caseId,
+    amount: 300_000,
+    kind: "session",
+    paidDate: DATE,
+    expectedCourse: "ortho",
+  });
+  assert.equal(session.ok, true);
+  assert.equal(caseWithDetails(caseId)!.paid, 450_000);
+
+  // ولا تُصبح الحالة ديناً على المريض بسبب مقدمة لم تكتمل.
+  assert.ok(!debtsList().map((r) => r.id).includes(caseId));
+
+  // المقدمة تُعدَّل لأعلى، ولا تنزل تحت ما قُبض منها (١٥٠ ألفاً).
+  assert.equal(updateCaseMeta(caseId, { downPaymentAgreed: 260_000 }, "ortho"), true);
+  assert.equal(updateCaseMeta(caseId, { downPaymentAgreed: 149_999 }, "ortho"), false);
+  assert.equal(updateCaseMeta(caseId, { downPaymentAgreed: 150_000 }, "ortho"), true);
+
+  // اكتملت المقدمة: أي دفعة مقدمة بعدها تُرفض وتُسجَّل جلسةً بدلاً منها.
+  const afterComplete = recordCasePayment({
+    caseId,
+    amount: 1_000,
+    kind: "down_payment",
+    paidDate: DATE,
+    expectedCourse: "ortho",
+  });
+  assert.equal(afterComplete.ok, false);
+  assert.equal(
+    afterComplete.ok === false && afterComplete.reason,
+    "exceeds_down_payment",
+  );
+});
+
+test("opening a case cannot collect more than the down payment it agreed on", () => {
+  assert.throws(() =>
+    createCaseWithPayment({
+      patientId,
+      doctorId,
+      treatmentTypeId: orthoTypeId,
+      openedDate: DATE,
+      listPrice: 0,
+      discount: 0,
+      totalPrice: 0,
+      downPaymentAgreed: 200_000,
+      firstPayment: { amount: 200_001, kind: "down_payment" },
+    }),
+  );
+
+  // حالة بلا مقدمة متفق عليها تبقى كما كانت: لا سقف على أول دفعة.
+  const free = createCaseWithPayment({
+    patientId,
+    doctorId,
+    treatmentTypeId: orthoTypeId,
+    openedDate: DATE,
+    listPrice: 0,
+    discount: 0,
+    totalPrice: 0,
+    firstPayment: { amount: 900_000, kind: "down_payment" },
+  });
+  assert.ok(free.paymentId);
 });

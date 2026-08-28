@@ -16,7 +16,7 @@ export function EmptyValue({
 }: {
   children?: React.ReactNode;
 }) {
-  return <span className="text-muted-foreground/60 text-xs">{children}</span>;
+  return <span className="text-muted-foreground text-sm">{children}</span>;
 }
 
 /** True for the values that should render as {@link EmptyValue}. */

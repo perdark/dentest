@@ -1,15 +1,21 @@
 import Link from "next/link";
-import { ChevronLeft, ChevronRight, CalendarDays } from "lucide-react";
+import { ChevronLeft, ChevronRight, CalendarDays, StickyNote } from "lucide-react";
 import {
   collectableCaseCount,
   dailyLedger,
   listDoctors,
   listTreatmentTypes,
   openCasesBrief,
+  xrayFilmsForDate,
 } from "@/lib/queries";
 import { todayISO, isValidISODate, formatDateAr } from "@/lib/dates";
 import { formatIQD } from "@/lib/format";
-import { medicalFlagsMarker, PAYMENT_KIND_LABELS, XRAY_BUCKET } from "@/lib/strings";
+import {
+  medicalFlagsMarker,
+  PAYMENT_KIND_LABELS,
+  XRAY_BUCKET,
+  XRAY_PLACEMENT_LABELS,
+} from "@/lib/strings";
 import { cn } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -44,6 +50,10 @@ export default async function DailyPage({
   const date = sp.date && isValidISODate(sp.date) ? sp.date : todayISO();
 
   const rows = dailyLedger(date);
+  // الأشعة لا دفعات لها: الفيلم مدفوع بتاريخه، فيُقرأ من سجله ويدخل إجمالي
+  // اليوم كي يطابق الدفتر ما في الدرج. [قرار العيادة 2026-08-25][D9]
+  const films = xrayFilmsForDate(date);
+  const filmsTotal = films.reduce((s, f) => s + f.price, 0);
   const doctors = listDoctors({ activeOnly: true });
   // الأشعة لها سجلها الخاص، ودخلها للعيادة لا للطبيب — فلا تُفتح من هنا. [D9]
   const treatments = listTreatmentTypes().filter(
@@ -74,7 +84,7 @@ export default async function DailyPage({
     g.lines.push(r);
     g.subtotal += r.amount;
   }
-  const grandTotal = rows.reduce((s, r) => s + r.amount, 0);
+  const grandTotal = rows.reduce((s, r) => s + r.amount, 0) + filmsTotal;
   const prevDate = shiftISO(date, -1);
   const nextDate = shiftISO(date, 1);
 
@@ -83,7 +93,7 @@ export default async function DailyPage({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-bold"><CalendarDays className="text-muted-foreground size-6 shrink-0" />الدفتر اليومي</h1>
-          <p className="text-muted-foreground text-sm">{formatDateAr(date)}</p>
+          <p className="text-base font-medium">{formatDateAr(date)}</p>
         </div>
         <div data-tour="daily-add">
           <EntryDialog
@@ -124,10 +134,10 @@ export default async function DailyPage({
       </div>
 
       {/* Ledger */}
-      {rows.length === 0 ? (
+      {rows.length === 0 && films.length === 0 ? (
         <Card data-tour="daily-ledger">
           <CardContent className="text-muted-foreground py-12 text-center text-sm">
-            لا توجد قيود في هذا اليوم. اضغط «إضافة قيد» لإضافة أول دفعة.
+            لا توجد تسجيلات في هذا اليوم. اضغط «تسجيل جديد» لإضافة أول دفعة.
           </CardContent>
         </Card>
       ) : (
@@ -146,20 +156,34 @@ export default async function DailyPage({
                     <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                       <span className="font-medium">{line.patientName}</span>
                       <span className="text-muted-foreground">·</span>
-                      <span className="text-muted-foreground">{line.treatment}</span>
+                      <span>{line.treatment}</span>
                       <Badge variant={kindVariant(line.kind)}>
                         {PAYMENT_KIND_LABELS[line.kind] ?? line.kind}
                       </Badge>
                       {line.implantCardNo != null ? (
-                        <span className="text-muted-foreground text-xs">
-                          بطاقة #{line.implantCardNo}
+                        <span className="text-sm">
+                          بطاقة #
+                          <span className="font-medium tabular-nums">
+                            {line.implantCardNo}
+                          </span>
                         </span>
                       ) : null}
                       {/* الدفتر مجموعٌ بالطبيب، و«مجموع الطبيب» أسفله نقدُ اليوم
                           لا أساس حصته. الأشعة وحدها تختلف بين الرقمين، فتُعلَّم
                           هنا كي لا يُقرأ سطرها كعمل يُحتسب له. [D9] */}
                       {line.bucket === XRAY_BUCKET ? (
-                        <span className="text-muted-foreground text-xs">دخل العيادة</span>
+                        <span className="text-sm font-medium">دخل العيادة</span>
+                      ) : null}
+                      {/* ملاحظة الدفعة تُقرأ من السطر نفسه — كانت محفوظة ولا تُعرض
+                          في أي شاشة. النص الكامل يظهر عند المرور. */}
+                      {line.note?.trim() ? (
+                        <span
+                          title={line.note}
+                          className="inline-flex min-w-0 max-w-64 items-center gap-1.5 text-sm"
+                        >
+                          <StickyNote className="text-muted-foreground size-4 shrink-0" />
+                          <span className="truncate">{line.note}</span>
+                        </span>
                       ) : null}
                     </div>
                     <div className="flex shrink-0 items-center gap-1">
@@ -182,11 +206,11 @@ export default async function DailyPage({
                 ))}
 
                 <Separator className="my-2" />
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">مجموع الطبيب</span>
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground text-sm">مجموع الطبيب</span>
                   <span
                     className={cn(
-                      "money font-semibold tabular-nums",
+                      "money text-base font-bold tabular-nums",
                       g.subtotal < 0 && "text-destructive",
                     )}
                   >
@@ -197,13 +221,53 @@ export default async function DailyPage({
             </Card>
           ))}
 
+          {/* الأشعة — بلا طبيب وبلا اسم، فلها بطاقتها لا مجموعة طبيب. [D9] */}
+          {films.length > 0 ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex flex-wrap items-center gap-2">
+                  الأشعة
+                  <span className="text-muted-foreground text-sm font-normal">
+                    دخل العيادة
+                  </span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="flex flex-col">
+                {films.map((f) => (
+                  <div
+                    key={f.id}
+                    className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 py-2"
+                  >
+                    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+                      <span className="font-medium">{f.treatment}</span>
+                      <Badge variant="outline">
+                        {XRAY_PLACEMENT_LABELS[f.placement] ?? f.placement}
+                      </Badge>
+                    </div>
+                    <span className="money shrink-0 font-semibold tabular-nums">
+                      {formatIQD(f.price)}
+                    </span>
+                  </div>
+                ))}
+
+                <Separator className="my-2" />
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground text-sm">مجموع الأشعة</span>
+                  <span className="money text-base font-bold tabular-nums">
+                    {formatIQD(filmsTotal)}
+                  </span>
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
+
           {/* Grand total */}
           <Card>
             <CardContent className="flex items-center justify-between py-4">
               <span className="text-base font-semibold">إجمالي اليوم</span>
               <span
                 className={cn(
-                  "money text-lg font-bold tabular-nums",
+                  "money text-2xl font-bold tabular-nums",
                   grandTotal < 0 && "text-destructive",
                 )}
               >

@@ -11,6 +11,8 @@ import {
   cashMovements,
 } from "@/lib/db/schema";
 import { getSettings, recordEdit } from "@/lib/server-utils";
+// دخل الأفلام يُقرأ من مكان واحد فقط — لا نسخة ثانية من الجمع هنا.
+import { xrayFilmIncomeForPeriod } from "@/lib/queries";
 import { formatPeriodAr } from "@/lib/dates";
 import { XRAY_BUCKET } from "@/lib/strings";
 import { calculateDoctorPayout, payoutShortfall } from "@/lib/settlement-math";
@@ -180,9 +182,13 @@ export function computeSettlement(
   // Clinic income: collected on the "xray" bucket, which no doctor row above
   // asked for. Read live even for a closed month, exactly like monthExpenses —
   // a snapshot freezes the doctors' shares, not the clinic's own books. [D9]
-  const xrayIncome = collected
-    .filter((c) => c.bucket === XRAY_BUCKET)
-    .reduce((s2, c) => s2 + c.total, 0);
+  const xrayIncome =
+    collected
+      .filter((c) => c.bucket === XRAY_BUCKET)
+      .reduce((s2, c) => s2 + c.total, 0) +
+    // الأفلام الجديدة لا سطر دفعة لها — سعرها هو دخلها بتاريخها.
+    // [قرار العيادة 2026-08-25]
+    xrayFilmIncomeForPeriod(period);
 
   return {
     period,

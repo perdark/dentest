@@ -16,6 +16,7 @@ import {
 import { NativeSelect } from "@/components/forms/native-select";
 import { SubmitButton } from "@/components/forms/submit-button";
 import { useActionToast } from "@/components/forms/use-action-toast";
+import { FormError } from "@/components/forms/form-error";
 import { MoneySummary } from "@/components/forms/money-summary";
 import { parseAmount } from "@/lib/format";
 import { createImplantCard, type ImplantFormState } from "@/lib/actions/implants";
@@ -54,8 +55,20 @@ export function NewCard({
     }, []),
   );
 
+  // إغلاق بلا حفظ يُفرغ النموذج كاملاً. الحقول غير المتحكَّم بها يمسحها إعادة
+  // التركيب، أما الثلاثة المتحكَّم بها فتبقى — فتُفتح بطاقة المريض التالي
+  // وفيها سعر المريض السابق وخصمه ومقدمته.
+  function handleOpenChange(next: boolean) {
+    setOpen(next);
+    if (!next) {
+      setPrice("");
+      setDiscount("");
+      setDownPayment("");
+    }
+  }
+
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger
         render={
           <Button className="h-11">
@@ -80,8 +93,17 @@ export function NewCard({
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="nc-phone">الهاتف</Label>
-              <Input id="nc-phone" name="phone" inputMode="tel" className="h-11" />
+              <Label htmlFor="nc-phone">الهاتف (اختياري)</Label>
+              <Input
+                id="nc-phone"
+                name="phone"
+                type="tel"
+                inputMode="tel"
+                dir="ltr"
+                autoComplete="off"
+                className="h-11 text-start"
+                placeholder="07XXXXXXXXX"
+              />
             </div>
 
             <div className="space-y-1.5">
@@ -101,7 +123,7 @@ export function NewCard({
             </div>
 
             <div className="space-y-1.5 sm:col-span-2">
-              <Label htmlFor="nc-address">العنوان</Label>
+              <Label htmlFor="nc-address">العنوان (اختياري)</Label>
               <Input id="nc-address" name="address" className="h-11" />
             </div>
 
@@ -113,7 +135,7 @@ export function NewCard({
                 inputMode="numeric"
                 placeholder="0"
                 required
-                className="h-11"
+                className="h-11 text-base tabular-nums"
                 value={price}
                 onChange={(e) => setPrice(e.target.value)}
               />
@@ -126,7 +148,7 @@ export function NewCard({
                 name="discount"
                 inputMode="numeric"
                 placeholder="0"
-                className="h-11"
+                className="h-11 text-base tabular-nums"
                 value={discount}
                 onChange={(e) => setDiscount(e.target.value)}
               />
@@ -139,19 +161,23 @@ export function NewCard({
                 name="downPayment"
                 inputMode="numeric"
                 placeholder="0"
-                className="h-11"
+                className="h-11 text-base tabular-nums"
                 value={downPayment}
                 onChange={(e) => setDownPayment(e.target.value)}
               />
             </div>
 
+            {/* السطر الحيّ يمتدّ على العمودين: وُضِع كخلية في الشبكة، فكان
+                يُحشر في نصف السطر بجوار حقل التاريخ. */}
             {price !== "" ? (
-              <MoneySummary
-                figures={[
-                  { label: "الصافي", amount: net },
-                  { label: "المتبقي", amount: remaining, emphasis: true },
-                ]}
-              />
+              <div className="sm:col-span-2">
+                <MoneySummary
+                  figures={[
+                    { label: "الصافي", amount: net },
+                    { label: "المتبقي", amount: remaining, emphasis: true },
+                  ]}
+                />
+              </div>
             ) : null}
 
             <div className="space-y-1.5">
@@ -166,16 +192,14 @@ export function NewCard({
             </div>
           </div>
 
-          {state.error ? (
-            <p className="text-destructive text-sm">{state.error}</p>
-          ) : null}
+          <FormError>{state.error}</FormError>
 
           <div className="flex justify-end gap-2 pt-1">
             <Button
               type="button"
               variant="outline"
               className="h-11"
-              onClick={() => setOpen(false)}
+              onClick={() => handleOpenChange(false)}
             >
               إلغاء
             </Button>

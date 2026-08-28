@@ -19,6 +19,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { SubmitButton } from "@/components/forms/submit-button";
 import { useActionToast } from "@/components/forms/use-action-toast";
+import { FormError } from "@/components/forms/form-error";
 import type { Patient } from "@/lib/db/schema";
 import {
   MEDICAL_FLAGS,
@@ -95,7 +96,7 @@ export function PatientForm({
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="patient-phone">رقم الهاتف</Label>
+            <Label htmlFor="patient-phone">رقم الهاتف (اختياري)</Label>
             <Input
               id="patient-phone"
               name="phone"
@@ -110,7 +111,7 @@ export function PatientForm({
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="patient-address">العنوان</Label>
+            <Label htmlFor="patient-address">العنوان (اختياري)</Label>
             <Input
               id="patient-address"
               name="address"
@@ -122,12 +123,12 @@ export function PatientForm({
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="patient-notes">ملاحظات</Label>
+            <Label htmlFor="patient-notes">ملاحظات (اختياري)</Label>
             <Textarea
               id="patient-notes"
               name="notes"
               defaultValue={patient?.notes ?? ""}
-              placeholder="ملاحظات إضافية (اختياري)"
+              placeholder="ملاحظات إضافية عن المريض"
             />
           </div>
 
@@ -167,11 +168,7 @@ export function PatientForm({
             />
           </div>
 
-          {state.error ? (
-            <p className="text-destructive text-sm" role="alert">
-              {state.error}
-            </p>
-          ) : null}
+          <FormError>{state.error}</FormError>
 
           <DialogFooter>
             <DialogClose render={<Button type="button" variant="outline" className="h-11" />}>

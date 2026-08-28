@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Search, IdCard } from "lucide-react";
 import { implantIndex, listDoctors } from "@/lib/queries";
 import { formatIQD } from "@/lib/format";
-import { formatDateAr, todayISO } from "@/lib/dates";
+import { formatDateShortY, todayISO } from "@/lib/dates";
 import { CASE_STATUS_LABELS } from "@/lib/strings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -88,12 +88,12 @@ export default async function ImplantsPage({
               <TableRow>
                 <TableHead>رقم الكارت</TableHead>
                 <TableHead>المريض</TableHead>
-                <TableHead>الطبيب</TableHead>
-                <TableHead className="text-start">الإجمالي</TableHead>
+                <TableHead className="hidden md:table-cell">الطبيب</TableHead>
+                <TableHead className="hidden text-start sm:table-cell">الإجمالي</TableHead>
                 <TableHead className="text-start">المدفوع</TableHead>
                 <TableHead className="text-start">المتبقي</TableHead>
                 <TableHead>الحالة</TableHead>
-                <TableHead>التاريخ</TableHead>
+                <TableHead className="hidden lg:table-cell">التاريخ</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -105,19 +105,20 @@ export default async function ImplantsPage({
                   <TableCell>
                     <Link
                       href={`/implants/${r.id}`}
-                      className="text-primary font-medium underline-offset-4 hover:underline"
+                      className="text-primary inline-flex min-h-11 items-center font-medium underline-offset-4 hover:underline"
                     >
                       {r.patientName}
                     </Link>
                   </TableCell>
-                  <TableCell>{r.doctorName}</TableCell>
-                  <TableCell className="money text-start tabular-nums">
+                  <TableCell className="hidden md:table-cell">{r.doctorName}</TableCell>
+                  <TableCell className="money hidden text-start tabular-nums sm:table-cell">
                     {formatIQD(r.totalPrice)}
                   </TableCell>
                   <TableCell className="money text-start tabular-nums">
                     {formatIQD(r.paid)}
                   </TableCell>
-                  <TableCell className="money text-start font-medium tabular-nums">
+                  {/* «المتبقي» هو العمود الذي يُقرأ من هذا الجدول، فيكبر عن جيرانه. */}
+                  <TableCell className="money text-start text-lg font-bold tabular-nums">
                     {formatIQD(r.remaining)}
                   </TableCell>
                   <TableCell>
@@ -125,8 +126,10 @@ export default async function ImplantsPage({
                       {CASE_STATUS_LABELS[r.status] ?? r.status}
                     </Badge>
                   </TableCell>
-                  <TableCell className="whitespace-nowrap">
-                    {formatDateAr(r.openedDate)}
+                  <TableCell className="hidden whitespace-nowrap lg:table-cell">
+                    <span dir="ltr" className="tabular-nums">
+                      {formatDateShortY(r.openedDate)}
+                    </span>
                   </TableCell>
                 </TableRow>
               ))}

@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { ArrowRight } from "lucide-react";
 import { caseWithDetails, caseRaw, paymentsForCase } from "@/lib/queries";
 import { formatIQD } from "@/lib/format";
-import { formatDateAr, todayISO } from "@/lib/dates";
+import { formatDateShort, formatDateShortY, todayISO } from "@/lib/dates";
 import { CASE_STATUS_LABELS, PAYMENT_KIND_LABELS } from "@/lib/strings";
 import { Badge } from "@/components/ui/badge";
 import { MedicalBadge } from "@/components/ui/medical-badge";
@@ -27,11 +27,20 @@ const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "
   cancelled: "destructive",
 };
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  children,
+  strong,
+}: {
+  label: string;
+  children: React.ReactNode;
+  /** الرقم الحاسم في البطاقة — يكبر عن بقية الحقول. */
+  strong?: boolean;
+}) {
   return (
     <div className="space-y-1 border-b py-2 last:border-0">
-      <dt className="text-muted-foreground text-xs">{label}</dt>
-      <dd className="text-sm font-medium">
+      <dt className="text-muted-foreground text-sm">{label}</dt>
+      <dd className={strong ? "text-xl font-bold" : "text-base font-medium"}>
         {isBlank(children) ? <EmptyValue /> : children}
       </dd>
     </div>
@@ -72,7 +81,7 @@ export default async function ImplantCardPage({
               بطاقة زراعة رقم {details.implantCardNo ?? "…"}
             </h1>
             <div className="mt-1 flex flex-wrap items-center gap-2">
-              <p className="text-muted-foreground text-sm">{details.patientName}</p>
+              <p className="text-base font-medium">{details.patientName}</p>
               <MedicalBadge flags={details.patientMedicalFlags} />
             </div>
           </div>
@@ -112,7 +121,11 @@ export default async function ImplantCardPage({
               </Field>
               <Field label="الطبيب">{details.doctorName}</Field>
               <Field label="العنوان">{raw.addressSnapshot}</Field>
-              <Field label="التاريخ">{formatDateAr(details.openedDate)}</Field>
+              <Field label="التاريخ">
+                <span dir="ltr" className="tabular-nums">
+                  {formatDateShortY(details.openedDate)}
+                </span>
+              </Field>
               <Field label="عدد الجلسات">
                 {/* الجلسات فقط — الاسترجاع والتسوية ليست زيارات. [D4] */}
                 <span className="tabular-nums">
@@ -148,10 +161,8 @@ export default async function ImplantCardPage({
               <Field label="المدفوع">
                 <span className="money tabular-nums">{formatIQD(details.paid)}</span>
               </Field>
-              <Field label="المتبقي">
-                <span className="money text-base font-bold tabular-nums">
-                  {formatIQD(details.remaining)}
-                </span>
+              <Field label="المتبقي" strong>
+                <span className="money tabular-nums">{formatIQD(details.remaining)}</span>
               </Field>
             </dl>
           </CardContent>
@@ -181,18 +192,22 @@ export default async function ImplantCardPage({
                 {payments.map((p) => (
                   <TableRow key={p.id}>
                     <TableCell className="whitespace-nowrap">
-                      {formatDateAr(p.paidDate)}
+                      <span dir="ltr" className="tabular-nums">
+                        {formatDateShort(p.paidDate)}
+                      </span>
                     </TableCell>
                     <TableCell>
                       <Badge variant="outline">
                         {PAYMENT_KIND_LABELS[p.kind] ?? p.kind}
                       </Badge>
                     </TableCell>
-                    <TableCell className="money text-start tabular-nums">
+                    <TableCell className="money text-start font-semibold tabular-nums">
                       {formatIQD(p.amount)}
                     </TableCell>
                     <TableCell>{p.doctorName}</TableCell>
-                    <TableCell className="text-muted-foreground">{p.note}</TableCell>
+                    <TableCell title={p.note ?? undefined} className="max-w-64 truncate">
+                      {p.note}
+                    </TableCell>
                     <TableCell className="text-end">
                       <VoidPaymentButton
                         paymentId={p.id}

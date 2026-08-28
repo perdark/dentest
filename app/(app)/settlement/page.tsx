@@ -44,7 +44,7 @@ export default async function SettlementPage({
               <ChevronRight className="size-4" />
               السابق
             </Button>
-            <span className="min-w-28 text-center text-sm font-semibold">
+            <span className="min-w-28 text-center text-base font-semibold">
               {formatPeriodAr(period)}
             </span>
             <Button
@@ -62,7 +62,7 @@ export default async function SettlementPage({
 
         {/* قاعدة الاحتساب مكتوبة للعيادة، لا تحذير: من يقرأ الجدول يحتاج أن
             يعرف على أي أساس خرجت الأرقام. تتبع ما هو مضبوط في «الإعدادات». */}
-        <p className="text-muted-foreground bg-muted/40 rounded-lg px-3 py-2.5 text-sm leading-relaxed">
+        <p className="bg-muted/40 rounded-lg px-3 py-2.5 text-sm leading-relaxed">
           طريقة الاحتساب الحالية: النسبة تُحسب على المبلغ المُحصَّل، وأجور المختبر
           مصروف عام للعيادة ولا تُخصم من الطبيب. تُغيَّر من «الإعدادات».
         </p>
@@ -70,12 +70,11 @@ export default async function SettlementPage({
         {/* سطر تعريفي فقط: مستحقات المختبر خارج الحصص تماماً، ويُقرأ تفصيلها في
             صفحة كل طبيب. لا يدخل أي رقم منه في الجدول أدناه. [2026-08-19] */}
         {labDues !== 0 ? (
-          <p className="text-muted-foreground text-sm">
+          <p className="rounded-lg border px-3 py-2.5 text-sm leading-relaxed">
             مستحقات المختبرات هذا الشهر{" "}
-            <span className="money text-foreground font-semibold">
-              {formatIQD(labDues)}
-            </span>{" "}
-            — تتبّع خارج الحصص، تفصيلها في صفحة «الأطباء».
+            <span className="money text-lg font-bold">{formatIQD(labDues)}</span>{" "}
+            — تتبّع خارج الحصص: متابعة بين كل طبيب ومختبره، لا تُخصم من حصة أي
+            طبيب ولا من صندوق العيادة. تفصيلها في صفحة «الأطباء».
           </p>
         ) : null}
       </header>

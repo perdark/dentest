@@ -13,6 +13,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { useActionToast } from "@/components/forms/use-action-toast";
+import { FormError } from "@/components/forms/form-error";
 import { formatIQD } from "@/lib/format";
 import { formatDateAr } from "@/lib/dates";
 import { deleteExpenseAction, type ExpenseFormState } from "@/lib/actions/expenses";
@@ -71,9 +72,7 @@ export function DeleteExpenseButton({
         <form action={formAction} className="flex flex-col gap-4">
           <input type="hidden" name="id" value={id} />
 
-          {state.error ? (
-            <p className="text-destructive text-sm">{state.error}</p>
-          ) : null}
+          <FormError>{state.error}</FormError>
 
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <DialogClose

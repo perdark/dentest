@@ -24,20 +24,31 @@ export interface ActionState {
  *
  * `onSuccess` is where closing a dialog or refreshing the route belongs, so a
  * screen never has two competing effects watching the same state.
+ *
+ * `toastError` is for the forms that have nowhere to print a failure: an icon
+ * button sitting in a table row («حضر», «حذف تسجيل المختبر») has no space under
+ * it for `state.error`, so those actions used to fail in complete silence — the
+ * row simply did not change. Forms with a visible <FormError> leave this off,
+ * or the same failure would be reported twice.
  */
 export function useActionToast<S extends ActionState>(
   state: S,
   message: string | ((state: S) => string),
   onSuccess?: () => void,
+  options?: { toastError?: boolean },
 ): void {
   const seen = useRef<S | null>(null);
+  const toastError = options?.toastError ?? false;
 
   useEffect(() => {
     // Includes the initial `{}` — it is "seen" without being a result.
     if (state === seen.current) return;
     seen.current = state;
-    if (!state.ok) return;
+    if (!state.ok) {
+      if (toastError && state.error) toast.error(state.error);
+      return;
+    }
     toast.success(typeof message === "function" ? message(state) : message);
     onSuccess?.();
-  }, [state, message, onSuccess]);
+  }, [state, message, onSuccess, toastError]);
 }

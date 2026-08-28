@@ -194,12 +194,18 @@
   }
 }
 
-/* Money figures: Western digits, aligned columns even in RTL. */
+/* Money figures: Western digits, aligned columns even in RTL.
+   This class lands on <td>/<th> as often as on <span>, so it may only style the
+   TEXT, never the box:
+   - `display: inline-block` on a table cell drops that cell out of the column
+     grid, so the header stops sitting above its own numbers.
+   - `direction: ltr` on a cell flips what `text-end` resolves to (right in an
+     LTR cell, left in the RTL header), which pushed every money header to the
+     opposite side of its column.
+   `unicode-bidi: isolate` keeps the digit run intact without touching either. */
 .money {
   font-variant-numeric: tabular-nums;
-  direction: ltr;
-  unicode-bidi: embed;
-  display: inline-block;
+  unicode-bidi: isolate;
 }
 
 /* ── Motion ──────────────────────────────────────────────────────────────────

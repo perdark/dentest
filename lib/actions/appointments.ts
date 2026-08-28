@@ -12,6 +12,7 @@ import { appointmentById } from "@/lib/queries";
 import {
   todayISO,
   isValidISODate,
+  isValidTime,
   shiftISOByDays,
   shiftISOByMonths,
 } from "@/lib/dates";
@@ -31,6 +32,7 @@ const bookSchema = z.object({
   phone: z.string().trim().optional().default(""),
   doctorId: z.string().optional().default(""),
   apptDate: z.string().optional().default(""),
+  apptTime: z.string().optional().default(""),
   note: z.string().trim().optional().default(""),
 });
 
@@ -46,6 +48,9 @@ export async function bookAppointment(
   const d = parsed.data;
 
   const apptDate = isValidISODate(d.apptDate) ? d.apptDate : todayISO();
+  if (d.apptTime && !isValidTime(d.apptTime)) {
+    return { error: "وقت الموعد غير صحيح" };
+  }
 
   // "بلا طبيب" يُقبل — أحياناً يُحجز الموعد قبل تحديد الطبيب.
   let doctorId: number | null = null;
@@ -60,7 +65,13 @@ export async function bookAppointment(
     phone: d.phone || null,
   });
 
-  createAppointment({ patientId, doctorId, apptDate, note: d.note || null });
+  createAppointment({
+    patientId,
+    doctorId,
+    apptDate,
+    apptTime: d.apptTime || null,
+    note: d.note || null,
+  });
 
   revalidateAppointments();
   return { ok: true };
@@ -149,6 +160,7 @@ export async function rebookAppointment(
     patientId: existing.patientId,
     doctorId: existing.doctorId,
     apptDate: nextDate,
+    apptTime: existing.apptTime,
     note: existing.note,
   });
 

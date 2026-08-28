@@ -4,6 +4,14 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   // better-sqlite3 is a native module — keep it out of the bundle.
   serverExternalPackages: ["better-sqlite3"],
+  // Next 16 dev takes a single-holder lock on the build directory (.next/dev/
+  // lock), so a second `next dev` in this project refuses to start with
+  // "Another next dev server is already running" — even on a different port.
+  // The e2e suite starts its own server on :3100 while a normal dev server is
+  // usually up on :3000/:3001, so `npm run e2e` failed for that reason alone
+  // and never reached a single test. Giving the e2e server its own build
+  // directory gives it its own lock. [e2e isolation]
+  ...(process.env.ZUHA_DIST_DIR ? { distDir: process.env.ZUHA_DIST_DIR } : {}),
   // This app is developed and run at 127.0.0.1 — `npm start` binds there, so
   // that is the address in the browser and in the Electron shell. Next 16 dev
   // serves /_next/* only to hosts it recognises, and 127.0.0.1 is not the same

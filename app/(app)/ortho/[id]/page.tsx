@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { ArrowRight, StickyNote } from "lucide-react";
 import { caseWithDetails, caseRaw, paymentsForCase } from "@/lib/queries";
 import { formatIQD } from "@/lib/format";
-import { formatDateAr, todayISO } from "@/lib/dates";
+import { formatDateShortY, todayISO } from "@/lib/dates";
 import { PAYMENT_KIND_LABELS, CASE_STATUS_LABELS } from "@/lib/strings";
 import { Badge } from "@/components/ui/badge";
 import { MedicalBadge } from "@/components/ui/medical-badge";
@@ -19,6 +19,8 @@ import {
 import { VoidPaymentButton } from "@/components/forms/void-payment-button";
 import { OrthoMetaForm } from "./ortho-meta-form";
 import { OrthoPaymentForm } from "./payment-form";
+import { OrthoDownPaymentSection } from "./down-payment-form";
+import { OrthoStatusButton } from "./case-status-form";
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive"> = {
   open: "default",
@@ -41,15 +43,40 @@ export default async function OrthoCasePage({
   if (!detail || !raw || !detail.isOrtho) notFound();
 
   const payments = paymentsForCase(caseId);
-  // القائمة مرتّبة من الأحدث، والمقدمة هي أوّل دفعة لا آخرها. [D5]
-  const downPayment = payments.findLast((p) => p.kind === "down_payment");
+  // المقدمة صارت مبلغاً متفقاً عليه يُسدَّد على دفعات: المقبوض هو مجموع قيود
+  // «المقدمة» كلها، لا أوّل دفعة وحدها. [قرار العيادة 2026-08-25]
+  const downPaymentAgreed = raw.downPaymentAgreed;
+  const downPaymentCollected = payments
+    .filter((p) => p.kind === "down_payment")
+    .reduce((sum, p) => sum + p.amount, 0);
+  const downPaymentRemaining = Math.max(0, downPaymentAgreed - downPaymentCollected);
   const today = todayISO();
+
+  // ترقيم الجلسات من الأقدم إلى الأحدث: «الجلسة ١» هي أوّل جلسة جرت، مهما كان
+  // ترتيب الجدول المعروض. القيود المؤرَّخة في اليوم نفسه تُرتَّب بـ id.
+  const sessionNumbers = new Map<number, number>();
+  payments
+    .filter((p) => p.kind === "session")
+    .slice()
+    .sort((a, b) =>
+      a.paidDate === b.paidDate ? a.id - b.id : a.paidDate < b.paidDate ? -1 : 1,
+    )
+    .forEach((p, i) => sessionNumbers.set(p.id, i + 1));
+
+  function paymentLabel(p: (typeof payments)[number]): string {
+    if (p.kind === "session") {
+      const no = sessionNumbers.get(p.id);
+      return no ? `الجلسة ${no}` : "جلسة";
+    }
+    if (p.kind === "down_payment") return "دفعة من المقدمة";
+    return PAYMENT_KIND_LABELS[p.kind] ?? p.kind;
+  }
 
   return (
     <div className="space-y-6">
       <Link
         href="/ortho"
-        className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 text-sm"
+        className="text-muted-foreground hover:text-foreground inline-flex min-h-11 items-center gap-1.5 text-sm"
       >
         <ArrowRight className="size-4" />
         عودة إلى سجل التقويم
@@ -68,16 +95,32 @@ export default async function OrthoCasePage({
             ملاحظة مسجّلة
           </Badge>
         ) : null}
+        {/* الحالة تبقى «مفتوح» حتى تُغلقها العيادة بيدها — الزر بجانب الشارة
+            حتى لا يُسأل «وكيف أغلقها؟». */}
+        <div className="ms-auto">
+          <OrthoStatusButton
+            caseId={caseId}
+            status={detail.status}
+            patientName={detail.patientName}
+          />
+        </div>
       </div>
 
-      {/* Money summary — مقدمة ومدفوع فقط: لا إجمالي متفق عليه في التقويم. [2026-08-19] */}
+      {/* Money summary — لا إجمالي متفق عليه في التقويم [2026-08-19]، والمقدمة
+          ثلاثة أرقام لا رقم واحد: المتفق عليه، والمقبوض منه، وما بقي. */}
       <Card>
         <CardHeader>
           <CardTitle>الحساب</CardTitle>
         </CardHeader>
-        <CardContent className="grid grid-cols-2 gap-4">
-          <Figure label="المقدمة" value={formatIQD(downPayment?.amount ?? 0)} />
-          <Figure label="المدفوع" value={formatIQD(detail.paid)} />
+        <CardContent className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <Figure label="المقدمة المتفق عليها" value={formatIQD(downPaymentAgreed)} />
+          <Figure label="المقبوض من المقدمة" value={formatIQD(downPaymentCollected)} />
+          <Figure
+            label="المتبقي من المقدمة"
+            value={formatIQD(downPaymentRemaining)}
+            highlight={downPaymentRemaining > 0}
+          />
+          <Figure label="إجمالي المدفوع" value={formatIQD(detail.paid)} />
         </CardContent>
       </Card>
 
@@ -97,10 +140,10 @@ export default async function OrthoCasePage({
           </CardContent>
         </Card>
 
-        {/* Add a session payment */}
+        {/* Add a session */}
         <Card>
           <CardHeader>
-            <CardTitle>إضافة دفعة جلسة</CardTitle>
+            <CardTitle>إضافة جلسة</CardTitle>
           </CardHeader>
           <CardContent>
             {/* لا شرط «متبقٍ»: الجلسة تُسعَّر عند إضافتها ما دامت الحالة مفتوحة. */}
@@ -114,10 +157,29 @@ export default async function OrthoCasePage({
         </Card>
       </div>
 
+      {/* المقدمة: اتفاقٌ يُحدَّد، ثم قبضٌ على دفعات. */}
+      <Card>
+        <CardHeader>
+          <CardTitle>المقدمة</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <OrthoDownPaymentSection
+            caseId={caseId}
+            today={today}
+            agreed={downPaymentAgreed}
+            collected={downPaymentCollected}
+            canCollect={detail.status === "open"}
+          />
+        </CardContent>
+      </Card>
+
       {/* Sessions / payments history */}
       <Card>
         <CardHeader>
           <CardTitle>الجلسات والدفعات</CardTitle>
+          <p className="text-muted-foreground text-sm">
+            كل جلسة برقمها ومبلغها وتاريخها، ودفعات المقدمة بينها.
+          </p>
         </CardHeader>
         <CardContent className="px-0">
           <Table>
@@ -141,17 +203,23 @@ export default async function OrthoCasePage({
               ) : (
                 payments.map((p) => (
                   <TableRow key={p.id}>
-                    <TableCell>{formatDateAr(p.paidDate)}</TableCell>
+                    <TableCell className="whitespace-nowrap">
+                      <span dir="ltr" className="tabular-nums">
+                        {formatDateShortY(p.paidDate)}
+                      </span>
+                    </TableCell>
                     <TableCell>
+                      {/* «الجلسة ٢» تقول ما لا يقوله «جلسة»: هذه ثاني زيارة
+                          مدفوعة في هذا الملف، لا زيارة مجهولة الترتيب. */}
                       <Badge variant={p.kind === "down_payment" ? "default" : "secondary"}>
-                        {PAYMENT_KIND_LABELS[p.kind] ?? p.kind}
+                        {paymentLabel(p)}
                       </Badge>
                     </TableCell>
                     <TableCell>{p.doctorName}</TableCell>
-                    <TableCell className="money text-end font-medium">
+                    <TableCell className="money text-end text-lg font-bold">
                       {formatIQD(p.amount)}
                     </TableCell>
-                    <TableCell className="text-muted-foreground">
+                    <TableCell title={p.note ?? undefined} className="max-w-64 truncate">
                       {p.note}
                     </TableCell>
                     <TableCell className="text-end">
@@ -184,10 +252,11 @@ function Figure({
 }) {
   return (
     <div className="space-y-1">
-      <p className="text-muted-foreground text-xs">{label}</p>
+      {/* التسمية تقول ما هو الرقم — لا تصغر عنه. */}
+      <p className="text-muted-foreground text-sm">{label}</p>
       <p
         className={
-          "money text-base font-semibold " + (highlight ? "text-destructive" : "")
+          "money text-2xl font-bold " + (highlight ? "text-destructive" : "")
         }
       >
         {value}

@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { NativeSelect } from "@/components/forms/native-select";
 import { SubmitButton } from "@/components/forms/submit-button";
 import { useActionToast } from "@/components/forms/use-action-toast";
+import { FormError } from "@/components/forms/form-error";
 import { MoneySummary } from "@/components/forms/money-summary";
 import { parseAmount } from "@/lib/format";
 import { CASH_MOVE_LABELS } from "@/lib/strings";
@@ -98,14 +99,14 @@ export function CashForm({
                 inputMode="numeric"
                 placeholder="0"
                 required
-                className="h-11"
+                className="h-11 text-base tabular-nums"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
               />
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="cm-note">ملاحظة</Label>
+              <Label htmlFor="cm-note">ملاحظة (اختياري)</Label>
               <Input id="cm-note" name="note" className="h-11" autoComplete="off" />
             </div>
           </div>
@@ -123,9 +124,7 @@ export function CashForm({
             />
           ) : null}
 
-          {state.error ? (
-            <p className="text-destructive text-sm">{state.error}</p>
-          ) : null}
+          <FormError>{state.error}</FormError>
 
           <SubmitButton className="h-11 w-full sm:w-auto">حفظ الحركة</SubmitButton>
         </form>

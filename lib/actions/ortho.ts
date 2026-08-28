@@ -46,6 +46,7 @@ export async function createOrthoCase(
     patientName: z.string().trim().min(1),
     phone: z.string().trim().optional(),
     doctorId: z.coerce.number().int().positive(),
+    downPaymentAgreed: z.string().optional(),
     downPayment: z.string().optional(),
     openedDate: z.string().optional(),
     nextAppointment: z.string().optional(),
@@ -63,8 +64,17 @@ export async function createOrthoCase(
   }
 
   // All money computed server-side, integer dinars only.
+  // المقدمة رقمان: المتفق عليه (يُثبَّت على الحالة) والمقبوض اليوم منه. كانت
+  // المقدمة تُقبض كاملة يوم الفتح، والعيادة تتفق على ٢٠٠ وتقبض ٥٠.
+  // [قرار العيادة 2026-08-25]
+  const downPaymentAgreed = parseAmount(d.downPaymentAgreed ?? "");
   const downPayment = parseAmount(d.downPayment ?? "");
-  if (downPayment < 0) return { error: "المبالغ يجب أن تكون موجبة." };
+  if (downPayment < 0 || downPaymentAgreed < 0) {
+    return { error: "المبالغ يجب أن تكون موجبة." };
+  }
+  if (downPaymentAgreed > 0 && downPayment > downPaymentAgreed) {
+    return { error: "المدفوع من المقدمة أكبر من المقدمة المتفق عليها." };
+  }
 
   const openedDate =
     d.openedDate && isValidISODate(d.openedDate) ? d.openedDate : todayISO();
@@ -85,6 +95,7 @@ export async function createOrthoCase(
     listPrice: 0,
     discount: 0,
     totalPrice: 0,
+    downPaymentAgreed,
     notes: null,
     firstPayment:
       downPayment > 0 ? { amount: downPayment, kind: "down_payment" } : undefined,
@@ -131,6 +142,107 @@ export async function addOrthoPayment(
     expectedCourse: "ortho",
   });
   if (!result.ok) return { error: paymentFailureMessage(result.reason) };
+
+  revalidateOrtho(d.caseId);
+  return { ok: true };
+}
+
+// ── Pay part of the agreed down payment ─────────────────────────────────────
+/**
+ * دفعة من المقدمة — لا مقدمة كاملة.
+ *
+ * المقدمة تُحدَّد مرة واحدة على الحالة ثم تُسدَّد شيئاً فشيئاً، فكل دفعة هنا
+ * قيدٌ من نوع `down_payment` وسقفها ما بقي من المتفق عليه (الحدّ نفسه محفوظ في
+ * `recordCasePayment`، لا هنا وحده). [قرار العيادة 2026-08-25]
+ */
+export async function addOrthoDownPayment(
+  _prev: OrthoFormState,
+  formData: FormData,
+): Promise<OrthoFormState> {
+  await requireAuth();
+  const schema = z.object({
+    caseId: z.coerce.number().int().positive(),
+    amount: z.string().optional(),
+    paidDate: z.string().optional(),
+    note: z.string().optional(),
+  });
+
+  const parsed = schema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: "تحقّق من بيانات الدفعة" };
+  const d = parsed.data;
+
+  const amount = parseAmount(d.amount ?? "");
+  if (amount <= 0) return { error: "أدخل مبلغاً صحيحاً أكبر من صفر" };
+
+  const paidDate =
+    d.paidDate && isValidISODate(d.paidDate) ? d.paidDate : todayISO();
+
+  const result = recordCasePayment({
+    caseId: d.caseId,
+    amount,
+    kind: "down_payment",
+    paidDate,
+    note: d.note?.trim() || null,
+    expectedCourse: "ortho",
+  });
+  if (!result.ok) return { error: paymentFailureMessage(result.reason) };
+
+  revalidateOrtho(d.caseId);
+  return { ok: true };
+}
+
+// ── Set / correct the agreed down payment ───────────────────────────────────
+export async function setOrthoDownPayment(
+  _prev: OrthoFormState,
+  formData: FormData,
+): Promise<OrthoFormState> {
+  await requireAuth();
+  const schema = z.object({
+    caseId: z.coerce.number().int().positive(),
+    downPaymentAgreed: z.string().optional(),
+  });
+
+  const parsed = schema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: "تحقّق من بيانات المقدمة" };
+  const d = parsed.data;
+
+  const downPaymentAgreed = parseAmount(d.downPaymentAgreed ?? "");
+  if (downPaymentAgreed < 0) return { error: "المقدمة يجب أن تكون موجبة." };
+
+  const updated = updateCaseMeta(d.caseId, { downPaymentAgreed }, "ortho");
+  // الرفض هنا سببه الوحيد المعروف: المقدمة الجديدة أقل مما قُبض منها فعلاً.
+  if (!updated) {
+    return { error: "لا يمكن جعل المقدمة أقل من المبلغ المقبوض منها." };
+  }
+
+  revalidateOrtho(d.caseId);
+  return { ok: true };
+}
+
+// ── Close / reopen the case ─────────────────────────────────────────────────
+/**
+ * إغلاق حالة التقويم.
+ *
+ * التقويم بلا إجمالي، فلا شيء يُغلق الحالة من نفسه: العيادة هي التي تقول
+ * «انتهى». الإغلاق يوقف إضافة الجلسات ولا يمسّ ما حُصِّل — الحصص محسوبة على
+ * الدفعات لا على حالة الملف. [قرار العيادة 2026-08-25]
+ */
+export async function setOrthoStatus(
+  _prev: OrthoFormState,
+  formData: FormData,
+): Promise<OrthoFormState> {
+  await requireAuth();
+  const schema = z.object({
+    caseId: z.coerce.number().int().positive(),
+    status: z.enum(["open", "completed"]),
+  });
+
+  const parsed = schema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: "تحقّق من حالة الملف" };
+  const d = parsed.data;
+
+  const updated = updateCaseMeta(d.caseId, { status: d.status }, "ortho");
+  if (!updated) return { error: "تعذّر تحديث الحالة؛ تحقّق من نوع العلاج" };
 
   revalidateOrtho(d.caseId);
   return { ok: true };

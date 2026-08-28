@@ -12,6 +12,8 @@ import { test, expect } from "@playwright/test";
  */
 
 const PATIENT = "مريض اختبار التقويم";
+const TIMED_PATIENT = "مريض اختبار الأسبوع";
+const UNTIMED_PATIENT = "مريض اختبار الجدول";
 
 test("the month view renders a Saturday-first grid and a day opens from it", async ({
   page,
@@ -73,4 +75,50 @@ test("booking, filtering and rebooking all round-trip through the server", async
 
   // الموعد الأصلي باقٍ كما هو — السجل سِجل.
   await expect(page.locator('[data-tour="appt-list"]')).toContainText(PATIENT);
+});
+
+/**
+ * عرض الأسبوع جدول أعمال لسبعة أيام، لا مسطرة ساعات: الوقت اختياري في هذا
+ * البرنامج والعيادة نادراً ما تُدخله، فالموعد بلا وقت مواطن كامل في عمود يومه.
+ */
+test("the weekly agenda lists each day's appointments, timed or not", async ({
+  page,
+}) => {
+  await page.goto("/appointments");
+
+  await page.getByRole("button", { name: "حجز موعد" }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("اسم المراجع").fill(TIMED_PATIENT);
+  await dialog.locator("#ap-time").fill("10:30");
+  await dialog.getByRole("button", { name: "حفظ الموعد" }).click();
+  await expect(dialog).toBeHidden();
+
+  // نفس اليوم، بلا وقت — هذا هو الشكل الغالب في الدفتر الحقيقي.
+  await page.getByRole("button", { name: "حجز موعد" }).click();
+  const second = page.getByRole("dialog");
+  await second.getByLabel("اسم المراجع").fill(UNTIMED_PATIENT);
+  await second.getByRole("button", { name: "حفظ الموعد" }).click();
+  await expect(second).toBeHidden();
+
+  await page.getByRole("button", { name: "أسبوع", exact: true }).click();
+  const calendar = page.locator('[data-tour="appt-week"]');
+  await expect(calendar).toBeVisible();
+
+  // الأسبوع العراقي يبدأ السبت وينتهي الجمعة — رؤوس الأعمدة تثبت ذلك.
+  await expect(calendar.getByText("السبت", { exact: true })).toBeVisible();
+  await expect(calendar.getByText("الجمعة", { exact: true })).toBeVisible();
+
+  // الموعد المؤقّت: الوقت بنظام ١٢ ساعة، والحالة مقروءة نصاً لا لوناً.
+  const timedRow = calendar.getByRole("link", { name: new RegExp(TIMED_PATIENT) });
+  await expect(timedRow).toContainText("10:30 ص");
+  await expect(timedRow).toContainText("محجوز");
+
+  // والموعد بلا وقت يظهر في نفس العمود موسوماً «بلا وقت» — لا يُنفى تحت الشبكة.
+  const untimedRow = calendar.getByRole("link", { name: new RegExp(UNTIMED_PATIENT) });
+  await expect(untimedRow).toContainText("بلا وقت");
+  await expect(untimedRow).toContainText("محجوز");
+
+  // فتح الموعد من التقويم يذهب إلى ملف المراجع.
+  await timedRow.click();
+  await expect(page.getByRole("heading", { name: TIMED_PATIENT })).toBeVisible();
 });

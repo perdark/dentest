@@ -12,6 +12,11 @@ Iraqi Dinar. Single shared PIN. No cloud.
 - `lib/server-utils.ts` — getSettings, cashOnHand, recordEdit, nextCounter, period helpers.
 - `lib/format.ts` — `formatIQD`, `formatIQDShort`, `formatNumber`, `parseAmount`.
 - `lib/dates.ts` — `todayISO`, `monthOf`, `currentPeriod`, `formatDateAr`, `formatPeriodAr`, `isValidISODate`.
+  Dates on screen are numeric: `formatDateShort` («8/30») in tables, calendar headers, list rows and chips,
+  `formatDateShortY` («8/30/2026») where no month header names the year; `formatDateAr` («30 آب 2026») is kept
+  only for a single date that reads as prose (page subtitle, confirm-dialog sentence). Times display through
+  `formatTime12` («2:30 م») — storage and `isValidTime` stay 24-hour "HH:MM". All four print Western digits, so
+  wrap every call in the `dir="ltr"` + `tabular-nums` span used for numbers elsewhere.
 - `lib/strings.ts` — Arabic label maps (treatments, categories, statuses, nav).
 - `components/ui/*` — shadcn (Base UI). `components/forms/SubmitButton`, `NativeSelect`.
 

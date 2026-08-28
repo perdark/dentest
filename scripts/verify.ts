@@ -19,7 +19,7 @@ import {
   recordCasePayment,
   addExpense,
   createPatient,
-  recordXray,
+  recordXrayFilm,
 } from "@/lib/mutations";
 import { computeSettlement, closeSettlement } from "@/lib/settlement";
 import { cashOnHand } from "@/lib/server-utils";
@@ -49,7 +49,7 @@ const ortho = types.find((t) => t.isOrtho)!;
 const extraction = types.find((t) => t.key === "extraction_normal")!;
 
 console.log("\n— Setup —");
-check("seed: 5 doctors", docs.length === 5);
+check("seed: 4 doctors", docs.length === 4);
 check("seed: owner is Adi", adi.name.includes("عدي"));
 check(
   "seed: every commission % is UNCONFIRMED (null) so the badge shows [C1]",
@@ -128,29 +128,23 @@ check(
   `paid=${caseWithDetails(orthoCase.caseId)!.paid}`,
 );
 
-// 4) X-ray on Adi's name (15,000 paid in full). Clinic income: it must move
+// 4) One 15,000 X-ray film — no patient, no doctor. Clinic income: it must move
 // cash and clinic net, and must leave every figure Adi is paid on untouched. [D9]
 const xrayType = types.find((t) => t.settlementBucket === "xray")!;
-const xray = recordXray({
-  patientId: needPatient("مريض الأشعة", "07700000004"),
-  doctorId: adi.id,
+const xray = recordXrayFilm({
+  filmDate: today,
   treatmentTypeId: xrayType.id,
-  date: today,
-  listPrice: 15_000,
-  discount: 0,
-  paidNow: 15_000,
+  placement: "internal",
+  price: 15_000,
 });
 check("xray: recorded through the X-ray register [D9]", xray.ok === true);
 check(
   "xray: dental work is refused by the X-ray register [D9]",
-  recordXray({
-    patientId: needPatient("مريض مرفوض", "07700000005"),
-    doctorId: adi.id,
+  recordXrayFilm({
+    filmDate: today,
     treatmentTypeId: extraction.id,
-    date: today,
-    listPrice: 50_000,
-    discount: 0,
-    paidNow: 50_000,
+    placement: "internal",
+    price: 50_000,
   }).ok === false,
 );
 
@@ -176,8 +170,8 @@ check("Zahra payout = 175k (×50%) [D3]", zahraS.payout === 175_000, `got ${zahr
 check("clinic net = collected + أشعة − payouts − expenses [D7][D9]", st.clinicNet === st.totalCollected + st.xrayIncome - st.totalPayout - st.monthExpenses, `net=${st.clinicNet}`);
 
 console.log("\n— X-ray income is the clinic's (D9) —");
-// Adi took a 15k X-ray this month. None of it may appear in what he is paid on:
-// collectedTotal stays 750k and accrued stays 2.05M (not 2.065M).
+// A 15k film was taken this month. None of it may appear in what any doctor is
+// paid on: Adi's collectedTotal stays 750k and accrued stays 2.05M.
 check("xray money is NOT in Adi's collected total", adiS.collectedTotal === 750_000, `got ${adiS.collectedTotal}`);
 check("xray work is NOT in Adi's work-done total", adiS.accruedTotal === 2_050_000, `got ${adiS.accruedTotal}`);
 check("xray money is NOT in Adi's payout", adiS.payout === 375_000, `got ${adiS.payout}`);
@@ -206,7 +200,8 @@ check(
 );
 
 console.log("\n— Cash on hand (D8) —");
-// opening 0 + payments(500k+300k-100k+50k+200k+150k+15k=1,115k) − expenses(150k) = 965k
+// opening 0 + payments(500k+300k-100k+50k+200k+150k=1,100k) + films(15k)
+// − expenses(150k) = 965k. الفيلم لا سطر دفعة له، فلولا جمعه هنا لنقص الدرج. [D8][D9]
 check("cashOnHand = 965k (xray cash included) [D8][D9]", cashOnHand() === 965_000, `got ${cashOnHand()}`);
 
 console.log("\n— Close month + closed-period edit (D3/D4) —");

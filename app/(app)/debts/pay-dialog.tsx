@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useActionToast } from "@/components/forms/use-action-toast";
+import { FormError } from "@/components/forms/form-error";
 import { MoneySummary } from "@/components/forms/money-summary";
 import { formatIQD, parseAmount } from "@/lib/format";
 import { recordDebtPayment, type PayState } from "@/lib/actions/debts";
@@ -45,8 +46,16 @@ export function PayDialog({
     }, []),
   );
 
+  // إغلاق الحوار بلا حفظ يمسح المبلغ المكتوب. بدون هذا كان الرقم المتروك
+  // يبقى في الحقل، فتفتح الموظفة الحوار مرة ثانية وتجد مبلغاً جاهزاً لم تكتبه
+  // الآن — وتضغط «حفظ الدفعة» عليه.
+  function handleOpenChange(next: boolean) {
+    setOpen(next);
+    if (!next) setAmount("");
+  }
+
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger
         render={<Button variant="outline" className="h-11 whitespace-nowrap" />}
       >
@@ -75,7 +84,7 @@ export function PayDialog({
               inputMode="numeric"
               autoComplete="off"
               placeholder="مثال: 50,000"
-              className="h-11"
+              className="h-11 text-base tabular-nums"
               autoFocus
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
@@ -104,9 +113,7 @@ export function PayDialog({
             />
           </div>
 
-          {state.error ? (
-            <p className="text-destructive text-sm">{state.error}</p>
-          ) : null}
+          <FormError>{state.error}</FormError>
 
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <DialogClose

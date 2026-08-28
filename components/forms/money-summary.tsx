@@ -20,23 +20,23 @@ export function MoneySummary({
 }) {
   if (figures.length === 0) return null;
   return (
-    <p className="text-muted-foreground text-sm">
-      {figures.map((f, i) => (
-        <span key={f.label}>
-          {i > 0 ? " · " : null}
-          {f.label}{" "}
+    // العنوان وحده باهت؛ الأرقام تُقرأ، والرقم الحاسم أكبرها.
+    <p className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm">
+      {figures.map((f) => (
+        <span key={f.label} className="inline-flex items-baseline gap-1.5">
+          <span className="text-muted-foreground">{f.label}</span>
           <span
             className={
               f.emphasis
-                ? "money text-foreground font-semibold"
-                : "money font-semibold"
+                ? "money text-foreground text-base font-bold"
+                : "money text-foreground text-sm font-semibold"
             }
           >
             {formatIQD(f.amount)}
           </span>
         </span>
       ))}
-      {suffix ? ` · ${suffix}` : null}
+      {suffix ? <span className="text-muted-foreground">{suffix}</span> : null}
     </p>
   );
 }

@@ -2,10 +2,15 @@ import Link from "next/link";
 import { Search, StickyNote, Smile } from "lucide-react";
 import { orthoCases, listDoctors } from "@/lib/queries";
 import { formatIQD } from "@/lib/format";
-import { formatDateAr, todayISO } from "@/lib/dates";
+import { formatDateShortY, todayISO } from "@/lib/dates";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { EmptyValue } from "@/components/ui/empty-value";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   Table,
   TableBody,
@@ -14,6 +19,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
+import { CASE_STATUS_LABELS } from "@/lib/strings";
 import { NewOrthoCaseDialog } from "./ortho-forms";
 
 export default async function OrthoPage({
@@ -71,19 +78,20 @@ export default async function OrthoPage({
           <TableHeader>
             <TableRow>
               <TableHead>المريض</TableHead>
-              <TableHead>الطبيب</TableHead>
-              <TableHead>التاريخ</TableHead>
-              <TableHead className="text-end">المقدمة</TableHead>
+              <TableHead className="hidden md:table-cell">الطبيب</TableHead>
+              <TableHead className="hidden lg:table-cell">التاريخ</TableHead>
+              <TableHead className="hidden text-end sm:table-cell">المقدمة</TableHead>
+              <TableHead className="hidden md:table-cell">الحالة</TableHead>
               <TableHead className="text-end">المدفوع</TableHead>
               <TableHead>الموعد القادم</TableHead>
-              <TableHead>ملاحظة</TableHead>
+              <TableHead>الملاحظة</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={7}
+                  colSpan={8}
                   className="text-muted-foreground py-10 text-center"
                 >
                   {q ? "لا توجد نتائج مطابقة." : "لا توجد حالات تقويم بعد."}
@@ -95,34 +103,70 @@ export default async function OrthoPage({
                   <TableCell className="font-medium">
                     <Link
                       href={`/ortho/${r.id}`}
-                      className="text-primary underline-offset-4 hover:underline"
+                      className="text-primary inline-flex min-h-11 items-center underline-offset-4 hover:underline"
                     >
                       {r.patientName}
                     </Link>
                   </TableCell>
-                  <TableCell>{r.doctorName}</TableCell>
-                  <TableCell>{formatDateAr(r.openedDate)}</TableCell>
-                  <TableCell className="money text-end">
-                    {formatIQD(r.downPayment)}
+                  <TableCell className="hidden md:table-cell">
+                    {r.doctorName}
                   </TableCell>
-                  <TableCell className="money text-end font-medium">
+                  <TableCell className="hidden whitespace-nowrap lg:table-cell">
+                    <span dir="ltr" className="tabular-nums">
+                      {formatDateShortY(r.openedDate)}
+                    </span>
+                  </TableCell>
+                  {/* المقدمة المتفق عليها، وتحتها ما بقي منها: الرقم وحده كان
+                      يُقرأ «قُبضت» وهو في الحقيقة اتفاق لم يكتمل. */}
+                  <TableCell className="money hidden text-end sm:table-cell">
+                    {formatIQD(r.downPaymentAgreed)}
+                    {r.downPaymentAgreed - r.downPayment > 0 ? (
+                      <span className="text-muted-foreground block text-xs font-normal">
+                        متبقٍ منها {formatIQD(r.downPaymentAgreed - r.downPayment)}
+                      </span>
+                    ) : null}
+                  </TableCell>
+                  <TableCell className="hidden md:table-cell">
+                    <Badge variant={r.status === "open" ? "default" : "secondary"}>
+                      {CASE_STATUS_LABELS[r.status] ?? r.status}
+                    </Badge>
+                  </TableCell>
+                  {/* المدفوع هو رقم التقويم الوحيد الذي يُقرأ من السطر — لا إجمالي
+                      ولا متبقٍ في هذا السجل، فيأخذ حجم الرقم الحاسم. */}
+                  <TableCell className="money text-end text-lg font-bold">
                     {formatIQD(r.paid)}
                   </TableCell>
                   <TableCell>
                     {r.nextAppointment ? (
-                      formatDateAr(r.nextAppointment)
-                    ) : (
-                      <span className="text-muted-foreground/60 text-xs">
-                        غير محدَّد
+                      <span dir="ltr" className="tabular-nums">
+                        {formatDateShortY(r.nextAppointment)}
                       </span>
+                    ) : (
+                      <EmptyValue>غير محدَّد</EmptyValue>
                     )}
                   </TableCell>
+                  {/* الملاحظة نفسها، لا إشارة إلى وجودها: سطر واحد مختصر، والنص
+                      الكامل يظهر عند المرور، والضغط يفتح الحالة. */}
                   <TableCell>
                     {r.hasComplaint ? (
-                      <Badge variant="secondary" className="gap-1">
-                        <StickyNote className="size-3" />
-                        ملاحظة
-                      </Badge>
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <Link
+                              href={`/ortho/${r.id}`}
+                              className="hover:text-primary flex min-h-11 max-w-64 items-center gap-1.5 text-start underline-offset-4 hover:underline"
+                            />
+                          }
+                        >
+                          <StickyNote className="text-muted-foreground size-4 shrink-0" />
+                          <span className="truncate">
+                            {r.complaintNote?.trim() || "ملاحظة مسجّلة على الحالة"}
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-sm text-sm whitespace-pre-wrap">
+                          {r.complaintNote?.trim() || "ملاحظة مسجّلة على الحالة"}
+                        </TooltipContent>
+                      </Tooltip>
                     ) : null}
                   </TableCell>
                 </TableRow>

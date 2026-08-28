@@ -1,14 +1,19 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowRight, HeartPulse, MapPin, Phone } from "lucide-react";
-import { patientById, casesForPatient } from "@/lib/queries";
+import { ArrowRight, Grid2x2, HeartPulse, MapPin, Phone, PhoneOff } from "lucide-react";
+import {
+  patientById,
+  casesForPatient,
+  teethForCase,
+  patientToothHistory,
+} from "@/lib/queries";
 import { formatIQD } from "@/lib/format";
-import { formatDateAr } from "@/lib/dates";
+import { formatDateShortY } from "@/lib/dates";
 import { CASE_STATUS_LABELS, ORTHO_BUCKET, medicalFlagsLine } from "@/lib/strings";
-import { cn } from "@/lib/utils";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { EmptyValue } from "@/components/ui/empty-value";
 import {
   Table,
   TableBody,
@@ -17,6 +22,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { PatientToothChart } from "@/components/tooth-chart/patient-tooth-chart";
 import { PatientForm } from "../patient-form";
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline"> = {
@@ -36,6 +42,23 @@ export default async function PatientProfilePage({
 
   const medicalLine = medicalFlagsLine(patient.medicalFlags);
   const cases = casesForPatient(patient.id);
+  // Marked-tooth count per case, so the file shows at a glance which visits
+  // were charted and which are still prose in a note.
+  const markCounts = new Map(cases.map((c) => [c.id, teethForCase(c.id).length]));
+  const toothMarkCount = (caseId: number) => markCounts.get(caseId) ?? 0;
+  // كل سن عولج لهذا المريض، عبر كل حالاته — الصورة المجمّعة للفم. لا يُخزَّن
+  // شيء هنا: القراءة من `case_teeth` نفسها، فلا يمكن أن تخالف الحالات.
+  const toothEvents = patientToothHistory(patient.id)
+    .filter((e) => e.scope === "tooth" && e.toothCode !== null)
+    .map((e) => ({
+      toothCode: e.toothCode as number,
+      treatmentKey: e.treatmentKey,
+      treatmentAr: e.treatmentAr,
+      openedDate: formatDateShortY(e.openedDate),
+      doctorName: e.doctorName,
+      caseId: e.caseId,
+      caseStatus: e.caseStatus,
+    }));
   // التقويم لا رصيد عليه: لا يوجد إجمالي متفق عليه، فالفرق بين الإجمالي
   // المحفوظ والمدفوع ليس ديناً. يُستثنى هنا كما يُستثنى في «الديون» حتى لا
   // يقرأ الموظف رقمين متناقضين عن المريض نفسه. [2026-08-19]
@@ -49,7 +72,7 @@ export default async function PatientProfilePage({
     <div className="space-y-4">
       <Link
         href="/patients"
-        className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-sm"
+        className="text-muted-foreground hover:text-foreground inline-flex min-h-11 items-center gap-1 text-sm"
       >
         <ArrowRight className="size-4" />
         كل المرضى
@@ -60,25 +83,25 @@ export default async function PatientProfilePage({
         <CardContent className="flex items-start justify-between gap-3">
           <div className="min-w-0 space-y-2">
             <h1 className="text-xl font-bold">{patient.fullName}</h1>
-            <div className="text-muted-foreground space-y-1 text-sm">
+            <div className="space-y-1 text-sm">
               {patient.phone ? (
                 <a
                   href={`tel:${patient.phone}`}
                   dir="ltr"
-                  className="text-primary flex w-fit items-center gap-1.5 hover:underline"
+                  className="text-primary flex min-h-11 w-fit items-center gap-1.5 underline-offset-4 hover:underline"
                 >
                   <Phone className="size-4 shrink-0" />
                   <span className="money">{patient.phone}</span>
                 </a>
               ) : (
-                <p className="flex items-center gap-1.5">
-                  <Phone className="size-4 shrink-0" />
-                  لا يوجد رقم هاتف
+                <p className="flex min-h-11 items-center gap-1.5">
+                  <PhoneOff className="text-muted-foreground size-4 shrink-0" />
+                  <EmptyValue>لا يوجد رقم هاتف</EmptyValue>
                 </p>
               )}
               {patient.address ? (
                 <p className="flex items-center gap-1.5">
-                  <MapPin className="size-4 shrink-0" />
+                  <MapPin className="text-muted-foreground size-4 shrink-0" />
                   {patient.address}
                 </p>
               ) : null}
@@ -102,6 +125,17 @@ export default async function PatientProfilePage({
         </CardContent>
       </Card>
 
+      {/* مخطط الأسنان — صورة الفم المجمّعة قبل جدول الحالات: الطبيب ينظر إلى
+          الفم أولاً، ثم يقرأ الأرقام. */}
+      <div className="space-y-2">
+        <h2 className="text-lg font-semibold">مخطط الأسنان</h2>
+        <Card>
+          <CardContent>
+            <PatientToothChart events={toothEvents} />
+          </CardContent>
+        </Card>
+      </div>
+
       {/* الحالات والعلاجات */}
       <div className="space-y-2">
         <h2 className="text-lg font-semibold">الحالات والعلاجات</h2>
@@ -118,10 +152,11 @@ export default async function PatientProfilePage({
                   <TableHead>العلاج</TableHead>
                   <TableHead className="hidden md:table-cell">الطبيب</TableHead>
                   <TableHead className="hidden sm:table-cell">تاريخ الفتح</TableHead>
-                  <TableHead className="text-end">الإجمالي</TableHead>
+                  <TableHead className="hidden text-end sm:table-cell">الإجمالي</TableHead>
                   <TableHead className="text-end">المدفوع</TableHead>
                   <TableHead className="text-end">المتبقي</TableHead>
                   <TableHead>الحالة</TableHead>
+                  <TableHead className="text-end">المخطط</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -137,7 +172,7 @@ export default async function PatientProfilePage({
                         {href ? (
                           <Link
                             href={href}
-                            className="text-primary font-medium hover:underline"
+                            className="text-primary inline-flex min-h-11 items-center font-medium underline-offset-4 hover:underline"
                           >
                             {c.treatment}
                           </Link>
@@ -146,25 +181,24 @@ export default async function PatientProfilePage({
                         )}
                       </TableCell>
                       <TableCell className="hidden md:table-cell">{c.doctorName}</TableCell>
-                      <TableCell className="hidden sm:table-cell">
-                        {formatDateAr(c.openedDate)}
+                      <TableCell className="hidden whitespace-nowrap sm:table-cell">
+                        <span dir="ltr" className="tabular-nums">
+                          {formatDateShortY(c.openedDate)}
+                        </span>
                       </TableCell>
-                      <TableCell className="text-end">
+                      <TableCell className="hidden text-end sm:table-cell">
                         <span className="money">{formatIQD(c.totalPrice)}</span>
                       </TableCell>
                       <TableCell className="text-end">
                         <span className="money">{formatIQD(c.paid)}</span>
                       </TableCell>
+                      {/* «المتبقي» هو ما يُقرأ من هذا الجدول فيكبر عن جيرانه، ولا
+                          يُلوَّن بالأحمر: رصيد المريض ليس مبلغاً سالباً. */}
                       <TableCell className="text-end">
                         {c.bucket === ORTHO_BUCKET ? (
-                          <span className="text-muted-foreground">—</span>
+                          <EmptyValue>لا ينطبق</EmptyValue>
                         ) : (
-                          <span
-                            className={cn(
-                              "money",
-                              c.remaining > 0 && "text-destructive font-medium",
-                            )}
-                          >
+                          <span className="money text-lg font-bold">
                             {formatIQD(c.remaining)}
                           </span>
                         )}
@@ -173,6 +207,22 @@ export default async function PatientProfilePage({
                         <Badge variant={STATUS_VARIANT[c.status] ?? "outline"}>
                           {CASE_STATUS_LABELS[c.status] ?? c.status}
                         </Badge>
+                      </TableCell>
+                      {/* المخطط متاح لكل حالة: حتى التقويم والتنظيف يُسجَّلان
+                          على فك أو على الفم كامل، لا على سن بعينه. */}
+                      <TableCell className="text-end">
+                        <Link
+                          href={`/cases/${c.id}/teeth`}
+                          aria-label={`مخطط أسنان — ${c.treatment}`}
+                          className="text-primary inline-flex min-h-11 items-center gap-1 text-sm underline-offset-4 hover:underline"
+                        >
+                          {toothMarkCount(c.id) > 0 ? (
+                            <span className="tabular-nums" dir="ltr">
+                              {toothMarkCount(c.id)}
+                            </span>
+                          ) : null}
+                          <Grid2x2 className="size-4" />
+                        </Link>
                       </TableCell>
                     </TableRow>
                   );
@@ -185,14 +235,7 @@ export default async function PatientProfilePage({
         {/* إجمالي المتبقي على المريض */}
         <div className="bg-muted/50 flex items-center justify-between gap-3 rounded-xl px-4 py-3 ring-1 ring-foreground/10">
           <span className="font-medium">إجمالي المتبقي على المريض</span>
-          <span
-            className={cn(
-              "money text-lg font-bold",
-              totalRemaining > 0 ? "text-destructive" : "text-foreground",
-            )}
-          >
-            {formatIQD(totalRemaining)}
-          </span>
+          <span className="money text-2xl font-bold">{formatIQD(totalRemaining)}</span>
         </div>
       </div>
     </div>

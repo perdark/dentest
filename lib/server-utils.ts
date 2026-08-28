@@ -9,6 +9,7 @@ import {
   monthlySettlements,
   payments,
   settings,
+  xrayFilms,
   type Settings,
 } from "@/lib/db/schema";
 
@@ -95,13 +96,20 @@ export function recordEdit(e: AuditEntry): boolean {
 
 /**
  * Cash on hand [D8] = opening balance + all payments (refunds are negative)
- * − all expenses + signed cash movements (reserves/withdrawals/payouts are
- * negative). Pure derivation; the system never moves money itself.
+ * + كل أسعار أفلام الأشعة − all expenses + signed cash movements
+ * (reserves/withdrawals/payouts are negative). Pure derivation; the system
+ * never moves money itself.
+ *
+ * الفيلم ليس له سطر دفعة: هو بيع نقدي مدفوع بتاريخه، فسعره نقدٌ في الدرج تماماً
+ * كأي دفعة. إغفاله هنا كان سيُظهر الصندوق أقلّ مما فيه كل يوم تُصوَّر فيه صورة.
+ * [قرار العيادة 2026-08-25][D9]
  */
 export function cashOnHand(): number {
   const s = getSettings();
   const pay =
     db.select({ v: sql<number>`coalesce(sum(${payments.amount}),0)` }).from(payments).get()?.v ?? 0;
+  const films =
+    db.select({ v: sql<number>`coalesce(sum(${xrayFilms.price}),0)` }).from(xrayFilms).get()?.v ?? 0;
   const exp =
     db.select({ v: sql<number>`coalesce(sum(${expenses.amount}),0)` }).from(expenses).get()?.v ?? 0;
   const mov =
@@ -109,5 +117,5 @@ export function cashOnHand(): number {
       .select({ v: sql<number>`coalesce(sum(${cashMovements.amount}),0)` })
       .from(cashMovements)
       .get()?.v ?? 0;
-  return s.openingCashBalance + pay - exp + mov;
+  return s.openingCashBalance + pay + films - exp + mov;
 }

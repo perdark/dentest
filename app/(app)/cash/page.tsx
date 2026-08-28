@@ -4,7 +4,7 @@ import { ChevronLeft, ChevronRight, AlertTriangle, Wallet } from "lucide-react";
 import { cashMovementsForMonth } from "@/lib/queries";
 import { cashOnHand, getSettings } from "@/lib/server-utils";
 import { formatIQD } from "@/lib/format";
-import { formatDateAr, formatPeriodAr, todayISO, currentPeriod, shiftPeriod } from "@/lib/dates";
+import { formatDateShort, formatPeriodAr, todayISO, currentPeriod, shiftPeriod } from "@/lib/dates";
 import { CASH_MOVE_LABELS } from "@/lib/strings";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -110,7 +110,9 @@ export default async function CashPage({
       >
         <Figure label="النقد المتوفر الآن" value={formatIQD(cash)} />
         <Figure label="داخل هذا الشهر" value={formatIQD(inflow)} />
-        <Figure label="خارج هذا الشهر" value={formatIQD(outflow)} tone="negative" />
+        {/* «خارج» تحمل الاتجاه بالفعل؛ إظهار السالب معها يُقرأ «خارج بالسالب».
+            المقدار هنا، والإشارة تبقى على «صافي الحركات» وحده. */}
+        <Figure label="خارج هذا الشهر" value={formatIQD(Math.abs(outflow))} tone="negative" />
         <Figure
           label="صافي الحركات"
           value={formatIQD(net)}
@@ -145,19 +147,21 @@ export default async function CashPage({
                 {rows.map((r) => (
                   <TableRow key={r.id}>
                     <TableCell className="ps-(--card-spacing) whitespace-nowrap">
-                      {formatDateAr(r.moveDate)}
+                      <span dir="ltr" className="tabular-nums">
+                        {formatDateShort(r.moveDate)}
+                      </span>
                     </TableCell>
                     <TableCell>
                       <Badge variant={r.type === "payout" ? "secondary" : "outline"}>
                         {CASH_MOVE_LABELS[r.type] ?? r.type}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-muted-foreground">
+                    <TableCell title={r.note ?? undefined} className="max-w-72 truncate">
                       {r.note}
                     </TableCell>
                     <TableCell
                       className={cn(
-                        "money pe-(--card-spacing) text-end font-semibold tabular-nums",
+                        "money pe-(--card-spacing) text-end text-lg font-bold tabular-nums",
                         r.amount < 0 && "text-destructive",
                       )}
                     >

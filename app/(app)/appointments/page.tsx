@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
 import {
   appointmentsForDate,
+  appointmentsForWeek,
   appointmentCountsForDate,
   appointmentCountsForMonth,
   upcomingAppointments,
@@ -12,9 +13,12 @@ import {
   todayISO,
   isValidISODate,
   formatDateAr,
+  formatDateShortY,
+  formatTime12,
   monthOf,
   shiftISOByDays,
   shiftISOByMonths,
+  startOfWeekISO,
 } from "@/lib/dates";
 import { APPT_STATUS_LABELS } from "@/lib/strings";
 import { Badge } from "@/components/ui/badge";
@@ -22,6 +26,7 @@ import { Button } from "@/components/ui/button";
 import { DayPicker } from "@/components/forms/day-picker";
 import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { MonthGrid } from "./month-grid";
+import { WeekGrid, APPT_STATUS_VARIANT } from "./week-grid";
 import {
   BookAppointmentDialog,
   AppointmentActions,
@@ -29,12 +34,6 @@ import {
 } from "./appointment-forms";
 
 export const metadata: Metadata = { title: "المواعيد" };
-
-const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
-  booked: "outline",
-  came: "default",
-  no_show: "destructive",
-};
 
 function CountCard({ label, value }: { label: string; value: number }) {
   return (
@@ -61,8 +60,8 @@ export default async function AppointmentsPage({
 }) {
   const sp = await searchParams;
   const date = sp.date && isValidISODate(sp.date) ? sp.date : todayISO();
-  // اليوم يبقى العرض الافتراضي — الشهر يُطلب صراحةً. [عقد الجولة: appt-list]
-  const view = sp.view === "month" ? "month" : "day";
+  // اليوم يبقى العرض الافتراضي — الأسبوع والشهر يُطلبان صراحةً. [عقد الجولة: appt-list]
+  const view = sp.view === "month" || sp.view === "week" ? sp.view : "day";
 
   const doctorIdNum = Number(sp.doctorId);
   const doctorId =
@@ -80,12 +79,15 @@ export default async function AppointmentsPage({
   const period = monthOf(date);
   const monthCounts = view === "month" ? appointmentCountsForMonth(period, filters) : null;
   const upcoming = view === "month" ? upcomingAppointments(date, 6) : [];
+  const weekStart = startOfWeekISO(date);
+  const weekAppointments = view === "week" ? appointmentsForWeek(weekStart, filters) : [];
 
   // المرشّحات تُحمل مع كل رابط تنقّل، وإلا عاد العرض إلى «كل الأطباء» فجأة.
   const carry = (over: Record<string, string>) => {
     const q = new URLSearchParams();
     q.set("date", over.date ?? date);
-    if ((over.view ?? view) === "month") q.set("view", "month");
+    const nextView = over.view ?? view;
+    if (nextView !== "day") q.set("view", nextView);
     if (doctorId) q.set("doctorId", String(doctorId));
     if (status) q.set("status", status);
     return `/appointments?${q.toString()}`;
@@ -95,16 +97,24 @@ export default async function AppointmentsPage({
   const nextDate = shiftISOByDays(date, 1);
   const prevMonth = shiftISOByMonths(`${period}-01`, -1);
   const nextMonth = shiftISOByMonths(`${period}-01`, 1);
+  const prevWeek = shiftISOByDays(weekStart, -7);
+  const nextWeek = shiftISOByDays(weekStart, 7);
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-4">
+    // سبعة أعمدة تحتاج عرضاً أكبر من عمود اليوم الواحد.
+    <div
+      className={`mx-auto flex flex-col gap-4 ${view === "week" ? "max-w-6xl" : "max-w-3xl"}`}
+    >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <CalendarDays className="text-muted-foreground size-6 shrink-0" />
           <div>
             <h1 className="text-2xl font-bold">المواعيد</h1>
-            <p className="text-muted-foreground text-sm">
-              السجل الرئيسي — {view === "month" ? "عرض الشهر" : formatDateAr(date)}
+            <p className="text-sm">
+              <span className="text-muted-foreground">السجل الرئيسي — </span>
+              <span className="font-medium">
+                {view === "month" ? "عرض الشهر" : view === "week" ? "عرض الأسبوع" : formatDateAr(date)}
+              </span>
             </p>
           </div>
         </div>
@@ -113,7 +123,7 @@ export default async function AppointmentsPage({
         </div>
       </div>
 
-      {/* يوم / شهر */}
+      {/* يوم / أسبوع / شهر */}
       <div data-tour="appt-view" className="flex flex-wrap items-center gap-2">
         <Button
           variant={view === "day" ? "default" : "outline"}
@@ -122,6 +132,14 @@ export default async function AppointmentsPage({
           render={<Link href={carry({ view: "day" })} />}
         >
           يوم
+        </Button>
+        <Button
+          variant={view === "week" ? "default" : "outline"}
+          className="h-11"
+          nativeButton={false}
+          render={<Link href={carry({ view: "week" })} />}
+        >
+          أسبوع
         </Button>
         <Button
           variant={view === "month" ? "default" : "outline"}
@@ -146,29 +164,46 @@ export default async function AppointmentsPage({
         <Button
           variant="outline"
           className="h-11 gap-1"
-          aria-label={view === "month" ? "الشهر السابق" : "اليوم السابق"}
+          aria-label={view === "month" ? "الشهر السابق" : view === "week" ? "الأسبوع السابق" : "اليوم السابق"}
           nativeButton={false}
-          render={<Link href={carry({ date: view === "month" ? prevMonth : prevDate })} />}
+          render={<Link href={carry({ date: view === "month" ? prevMonth : view === "week" ? prevWeek : prevDate })} />}
         >
           <ChevronRight className="size-4" />
           السابق
         </Button>
 
-        <DayPicker basePath="/appointments" date={date} label="اختر يوم المواعيد" />
+        <DayPicker
+          basePath="/appointments"
+          date={date}
+          label="اختر يوم المواعيد"
+          searchParams={{
+            ...(view !== "day" ? { view } : {}),
+            ...(doctorId ? { doctorId: String(doctorId) } : {}),
+            ...(status ? { status } : {}),
+          }}
+        />
 
         <Button
           variant="outline"
           className="h-11 gap-1"
-          aria-label={view === "month" ? "الشهر التالي" : "اليوم التالي"}
+          aria-label={view === "month" ? "الشهر التالي" : view === "week" ? "الأسبوع التالي" : "اليوم التالي"}
           nativeButton={false}
-          render={<Link href={carry({ date: view === "month" ? nextMonth : nextDate })} />}
+          render={<Link href={carry({ date: view === "month" ? nextMonth : view === "week" ? nextWeek : nextDate })} />}
         >
           التالي
           <ChevronLeft className="size-4" />
         </Button>
       </div>
 
-      {view === "month" && monthCounts ? (
+      {view === "week" ? (
+        <WeekGrid
+          startDate={weekStart}
+          appointments={weekAppointments}
+          today={todayISO()}
+          selected={date}
+          hrefFor={(d) => carry({ date: d, view: "day" })}
+        />
+      ) : view === "month" && monthCounts ? (
         <>
           <MonthGrid
             period={period}
@@ -182,7 +217,7 @@ export default async function AppointmentsPage({
             <h2 className="text-lg font-semibold">المواعيد القادمة</h2>
             {upcoming.length === 0 ? (
               <Card>
-                <CardContent className="text-muted-foreground py-8 text-center text-sm">
+                <CardContent className="text-muted-foreground py-8 text-center text-base">
                   لا توجد مواعيد قادمة بعد هذا اليوم.
                 </CardContent>
               </Card>
@@ -193,11 +228,16 @@ export default async function AppointmentsPage({
                     <Link
                       key={u.id}
                       href={carry({ date: u.apptDate, view: "day" })}
-                      className="hover:bg-muted/60 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-(--card-spacing) py-3"
+                      className="hover:bg-muted/60 flex min-h-11 flex-wrap items-center justify-between gap-x-3 gap-y-1 px-(--card-spacing) py-3"
                     >
-                      <span className="font-medium">{u.patientName}</span>
-                      <span className="text-muted-foreground text-sm">
-                        {formatDateAr(u.apptDate)} · {u.doctorName ?? "بلا طبيب"}
+                      <span className="text-base font-semibold">{u.patientName}</span>
+                      <span className="flex flex-wrap items-center gap-x-2 text-sm">
+                        <span dir="ltr" className="font-semibold tabular-nums">
+                          {formatDateShortY(u.apptDate)}
+                        </span>
+                        <span className={u.doctorName ? "" : "text-muted-foreground"}>
+                          {u.doctorName ?? "بلا طبيب"}
+                        </span>
                       </span>
                     </Link>
                   ))}
@@ -216,7 +256,7 @@ export default async function AppointmentsPage({
 
           {rows.length === 0 ? (
             <Card data-tour="appt-list">
-              <CardContent className="text-muted-foreground py-12 text-center text-sm">
+              <CardContent className="text-muted-foreground py-12 text-center text-base">
                 <CalendarDays className="mx-auto mb-3 size-10 opacity-40" />
                 {doctorId || status
                   ? "لا توجد مواعيد مطابقة للمرشّحات في هذا اليوم."
@@ -231,17 +271,26 @@ export default async function AppointmentsPage({
                     key={r.id}
                     className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-(--card-spacing) py-3"
                   >
-                    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+                      {/* هدف لمس ≥44px — اسم المراجع هو مدخل ملفّه. */}
                       <Link
                         href={`/patients/${r.patientId}`}
-                        className="text-primary inline-flex min-h-11 items-center font-medium underline-offset-4 hover:underline"
+                        className="text-primary inline-flex min-h-11 items-center text-base font-semibold underline-offset-4 hover:underline"
                       >
                         {r.patientName}
                       </Link>
-                      <Badge variant={STATUS_VARIANT[r.status] ?? "outline"}>
+                      <Badge
+                        variant={APPT_STATUS_VARIANT[r.status] ?? "outline"}
+                        className="h-6 px-2.5 text-sm"
+                      >
                         {APPT_STATUS_LABELS[r.status] ?? r.status}
                       </Badge>
-                      <span className="text-muted-foreground text-sm">
+                      {r.apptTime ? (
+                        <span dir="ltr" className="text-sm font-semibold tabular-nums">
+                          {formatTime12(r.apptTime)}
+                        </span>
+                      ) : null}
+                      <span className={r.doctorName ? "text-sm" : "text-muted-foreground text-sm"}>
                         {r.doctorName ?? "بلا طبيب"}
                       </span>
                       {r.phone ? (
@@ -249,13 +298,15 @@ export default async function AppointmentsPage({
                         <a
                           href={`tel:${r.phone}`}
                           dir="ltr"
-                          className="text-primary inline-flex min-h-11 items-center text-sm underline-offset-4 hover:underline"
+                          className="text-primary inline-flex min-h-11 items-center text-sm tabular-nums underline-offset-4 hover:underline"
                         >
                           {r.phone}
                         </a>
                       ) : null}
                       {r.note ? (
-                        <span className="text-muted-foreground text-xs">· {r.note}</span>
+                        <span className="text-sm">
+                          <span className="text-muted-foreground">ملاحظة:</span> {r.note}
+                        </span>
                       ) : null}
                     </div>
 
