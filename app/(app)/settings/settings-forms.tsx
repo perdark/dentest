@@ -8,6 +8,7 @@ import {
   BookOpen,
   CircleQuestionMark,
   Database,
+  RotateCcw,
   ShieldQuestion,
   Trash2,
 } from "lucide-react";
@@ -32,10 +33,13 @@ import {
   changePin,
   backupDb,
   wipeRecords,
+  restoreBackup,
+  cancelRestore,
   type PinState,
   type SettingsState,
   type BackupFile,
   type DemoState,
+  type RestoreState,
 } from "@/lib/actions/settings";
 import { formatIQD, formatNumber } from "@/lib/format";
 import { Button } from "@/components/ui/button";
@@ -52,6 +56,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { SubmitButton } from "@/components/forms/submit-button";
+import { NativeSelect } from "@/components/forms/native-select";
 
 /** نسبة لم تُدخَل بعد — علامة تشغيلية، لا ملاحظة داخلية. */
 function UnsetBadge() {
@@ -131,7 +136,7 @@ function GeneralSection({ settings }: { settings: SettingsView }) {
               autoComplete="off"
               className="money h-11 text-start"
             />
-            <p className="text-muted-foreground text-xs">
+            <p className="text-muted-foreground text-sm">
               النقد الموجود في الصندوق قبل بدء العمل في النظام. يدخل في حساب النقد المتوفر.
             </p>
           </div>
@@ -173,7 +178,7 @@ function AccountingSection({ settings }: { settings: SettingsView }) {
               autoComplete="off"
               className="money h-11 text-start"
             />
-            <p className="text-muted-foreground text-xs">
+            <p className="text-muted-foreground text-sm">
               يظهر تنبيه عندما يتجاوز النقد المتوفر هذا الحد (حالياً {formatIQD(settings.cashReserveThreshold)}).
             </p>
           </div>
@@ -193,7 +198,7 @@ function AccountingSection({ settings }: { settings: SettingsView }) {
               autoComplete="off"
               className="h-11 w-32 text-start"
             />
-            <p className="text-muted-foreground text-xs">
+            <p className="text-muted-foreground text-sm">
               تُستخدم للأطباء الذين لم تُحدَّد نسبتهم بعد.
             </p>
           </div>
@@ -202,7 +207,7 @@ function AccountingSection({ settings }: { settings: SettingsView }) {
           <div className="flex items-start justify-between gap-4">
             <div className="space-y-1">
               <Label htmlFor="labDeductedPerDoctor">خصم المختبر من الطبيب</Label>
-              <p className="text-muted-foreground text-xs">
+              <p className="text-muted-foreground text-sm">
                 عند التفعيل، يُخصم ثمن المختبر من حصة الطبيب.
               </p>
             </div>
@@ -218,7 +223,7 @@ function AccountingSection({ settings }: { settings: SettingsView }) {
           <div className="flex items-start justify-between gap-4">
             <div className="space-y-1">
               <Label htmlFor="pctAppliedAfterLab">احتساب النسبة بعد خصم المختبر</Label>
-              <p className="text-muted-foreground text-xs">
+              <p className="text-muted-foreground text-sm">
                 يُستخدم فقط إذا خُصم المختبر من الطبيب.
               </p>
             </div>
@@ -241,7 +246,7 @@ function AccountingSection({ settings }: { settings: SettingsView }) {
               autoComplete="off"
               className="h-11"
             />
-            <p className="text-muted-foreground text-xs">مثال: راتب ثابت شهري، أو إدخال يدوي.</p>
+            <p className="text-muted-foreground text-sm">مثال: راتب ثابت شهري، أو إدخال يدوي.</p>
           </div>
 
           <FormError state={state} />
@@ -290,7 +295,7 @@ function DoctorRow({ doctor }: { doctor: Doctor }) {
       </label>
 
       <div className="space-y-1">
-        <Label htmlFor={`pct_${doctor.id}`} className="text-muted-foreground text-xs">
+        <Label htmlFor={`pct_${doctor.id}`} className="text-muted-foreground text-sm">
           النسبة (%)
         </Label>
         <Input
@@ -378,7 +383,7 @@ function PinSection() {
               className="h-11 text-center tracking-widest"
               placeholder="••••"
             />
-            <p className="text-muted-foreground text-xs">4 أرقام على الأقل.</p>
+            <p className="text-muted-foreground text-sm">4 أرقام على الأقل.</p>
           </div>
           <div className="space-y-2">
             <Label htmlFor="confirmPin">تأكيد الرمز الجديد</Label>
@@ -391,7 +396,7 @@ function PinSection() {
               className="h-11 text-center tracking-widest"
               placeholder="••••"
             />
-            <p className="text-muted-foreground text-xs">
+            <p className="text-muted-foreground text-sm">
               أعد كتابة الرمز الجديد. خطأ مطبعي هنا يعني فقدان الدخول إلى النظام.
             </p>
           </div>
@@ -447,14 +452,14 @@ function BackupSection({ backups }: { backups: BackupFile[] }) {
 
         {backups.length > 0 ? (
           <div className="space-y-2">
-            <p className="text-muted-foreground text-xs font-medium">النسخ المحفوظة</p>
+            <p className="text-muted-foreground text-sm font-medium">النسخ المحفوظة</p>
             <ul className="divide-y rounded-lg border">
               {backups.map((b) => (
                 <li key={b.name} className="flex items-center justify-between gap-3 px-3 py-2">
-                  <span className="truncate font-mono text-xs" dir="ltr">
+                  <span className="truncate font-mono text-sm" dir="ltr">
                     {b.name}
                   </span>
-                  <span className="text-muted-foreground shrink-0 text-xs">
+                  <span className="text-muted-foreground shrink-0 text-sm">
                     {formatBytes(b.size)}
                   </span>
                 </li>
@@ -462,7 +467,111 @@ function BackupSection({ backups }: { backups: BackupFile[] }) {
             </ul>
           </div>
         ) : (
-          <p className="text-muted-foreground text-xs">لا توجد نسخ محفوظة بعد.</p>
+          <p className="text-muted-foreground text-sm">لا توجد نسخ محفوظة بعد.</p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── الاستعادة ────────────────────────────────────────────────────────────────
+/**
+ * ⚠️ الاستعادة لا تحدث فوراً — تُجهَّز وتُطبَّق عند التشغيل القادم، لأن قاعدة
+ * البيانات مفتوحة ما دام البرنامج يعمل. الشاشة تقول ذلك صراحةً: العيادة يجب أن
+ * تعرف أن سجلاتها لم تتغيّر بعدُ، وأن الإغلاق وإعادة الفتح هما ما يُتمّان العمل.
+ */
+function RestoreSection({
+  backups,
+  pending,
+}: {
+  backups: BackupFile[];
+  pending: string | null;
+}) {
+  const [state, action] = useActionState<RestoreState, FormData>(restoreBackup, {});
+  const seen = useRef<RestoreState | null>(null);
+  const [cancelling, startCancel] = useTransition();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (state === seen.current) return;
+    seen.current = state;
+    if (state.ok) toast.success("جُهِّزت الاستعادة", { description: state.message });
+  }, [state]);
+
+  function handleCancel() {
+    startCancel(async () => {
+      const res = await cancelRestore();
+      if (res.ok) {
+        toast.success("أُلغيت الاستعادة", { description: res.message });
+        router.refresh();
+      } else {
+        toast.error("تعذّر الإلغاء", { description: res.error });
+      }
+    });
+  }
+
+  return (
+    <Card data-tour="settings-restore">
+      <CardHeader>
+        <CardTitle>استعادة نسخة محفوظة</CardTitle>
+        <CardDescription>
+          إرجاع سجلات العيادة إلى ما كانت عليه يوم أُخذت النسخة.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {pending ? (
+          <div className="border-primary/40 bg-primary/5 space-y-3 rounded-lg border p-3">
+            <p className="text-base font-medium">استعادة بانتظار التشغيل القادم</p>
+            <p className="text-muted-foreground text-sm">
+              أغلق البرنامج الآن وافتحه من جديد لتُطبَّق. لن يتغيّر شيء قبل ذلك.
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleCancel}
+              disabled={cancelling}
+              className="h-11 w-full sm:w-auto"
+            >
+              {cancelling ? "جارٍ الإلغاء…" : "إلغاء الاستعادة"}
+            </Button>
+          </div>
+        ) : backups.length === 0 ? (
+          <p className="text-muted-foreground text-sm">
+            لا توجد نسخ محفوظة بعد. خُذ نسخة من القسم أعلاه أولاً.
+          </p>
+        ) : (
+          <form action={action} className="space-y-3 rounded-lg border p-3">
+            <p className="text-muted-foreground text-sm">
+              تُستبدل كل السجلات الحالية بما في النسخة المختارة.{" "}
+              <strong>يُحفظ ما لديك الآن في نسخة جديدة تلقائياً</strong> قبل أي شيء،
+              فالتراجع ممكن دائماً.
+            </p>
+            <div className="space-y-2">
+              <Label htmlFor="restore-name">النسخة</Label>
+              <NativeSelect id="restore-name" name="name" defaultValue={backups[0].name}>
+                {backups.map((b) => (
+                  <option key={b.name} value={b.name}>
+                    {b.name} — {formatBytes(b.size)}
+                  </option>
+                ))}
+              </NativeSelect>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="restore-confirm">اكتب كلمة «استعادة» للتأكيد</Label>
+              <Input
+                id="restore-confirm"
+                name="confirm"
+                autoComplete="off"
+                placeholder="استعادة"
+                className="h-11 sm:max-w-48"
+              />
+            </div>
+            <FormError state={state} />
+            <SubmitButton className="h-11 w-full sm:w-auto">
+              <RotateCcw className="size-4" />
+              تجهيز الاستعادة
+            </SubmitButton>
+          </form>
         )}
       </CardContent>
     </Card>
@@ -549,11 +658,11 @@ function ResetSection() {
         <form action={wipeAction} className="border-destructive/30 space-y-3 rounded-lg border p-3">
           <div>
             <p className="text-sm font-medium">مسح كل السجلات</p>
-            <p className="text-muted-foreground mt-1 text-xs">
+            <p className="text-muted-foreground mt-1 text-sm">
               يحذف المرضى والحالات والدفعات والمواعيد والمصروفات والحركات النقدية
               وسجل التعديلات. <strong>لا يمكن التراجع.</strong>
             </p>
-            <p className="text-muted-foreground mt-1 text-xs">
+            <p className="text-muted-foreground mt-1 text-sm">
               خُذ نسخة احتياطية أولاً من القسم أعلاه إذا كان في النظام أي شيء يهمّك.
             </p>
           </div>
@@ -582,10 +691,12 @@ export function SettingsForms({
   settings,
   doctors,
   backups,
+  pendingRestoreName,
 }: {
   settings: SettingsView;
   doctors: Doctor[];
   backups: BackupFile[];
+  pendingRestoreName: string | null;
 }) {
   return (
     <div className="space-y-6">
@@ -594,6 +705,7 @@ export function SettingsForms({
       <DoctorsSection doctors={doctors} />
       <PinSection />
       <BackupSection backups={backups} />
+      <RestoreSection backups={backups} pending={pendingRestoreName} />
       <TutorialSection />
       <ResetSection />
     </div>

@@ -9,12 +9,21 @@ const eslintConfig = defineConfig([
   globalIgnores([
     // Default ignores of eslint-config-next:
     ".next/**",
+    // The e2e dev server builds into its own dist dir (see ZUHA_DIST_DIR in
+    // next.config.ts). Without this, `npm run lint` reports ~9,000 problems in
+    // generated Turbopack chunks and a real error in real code becomes
+    // invisible in the noise. [2026-08-28]
+    ".next-e2e/**",
     "out/**",
     "build/**",
     "next-env.d.ts",
     // Packaging output: the staged server and the Electron distributables are
     // generated and contain vendored third-party JS.
     "dist/**",
+    // Playwright output: the HTML report bundles minified vendor JS, which
+    // alone accounts for every error `npm run lint` used to report.
+    "playwright-report/**",
+    "test-results/**",
   ]),
   {
     // The Electron main process is a CommonJS Node script, not app code —

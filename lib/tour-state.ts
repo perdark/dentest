@@ -20,6 +20,7 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { settings } from "@/lib/db/schema";
+import { isAuthed } from "@/lib/auth";
 
 const ROW_ID = 1;
 
@@ -35,8 +36,16 @@ function parse(raw: string | null | undefined): string[] {
   }
 }
 
-/** Pathnames whose tour has been completed. */
+/**
+ * Pathnames whose tour has been completed.
+ *
+ * ⚠️ Guarded with `isAuthed()` rather than `requireAuth()`: these two are the
+ * only actions in the app that are not navigations, and a `redirect()` thrown
+ * out of a fire-and-forget call would surface as an unhandled rejection rather
+ * than a login screen. Signed out, the honest answer is "no tours recorded".
+ */
 export async function seenTours(): Promise<string[]> {
+  if (!(await isAuthed())) return [];
   const row = await db
     .select({ toursSeen: settings.toursSeen })
     .from(settings)
@@ -53,6 +62,9 @@ export async function seenTours(): Promise<string[]> {
  * anything a second process can touch.
  */
 export async function markTourSeen(pathname: string): Promise<void> {
+  // Same reasoning as `seenTours`: no write happens for a caller who is not
+  // signed in, and nothing is thrown at a component that cannot handle it.
+  if (!(await isAuthed())) return;
   const current = await seenTours();
   if (current.includes(pathname)) return;
   await db

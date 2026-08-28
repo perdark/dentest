@@ -91,5 +91,7 @@ signing needs a paid certificate.
 2. The login screen appears within a few seconds → the server and native module loaded.
 3. Log in with `1234`, then change the PIN in الإعدادات.
 4. Help menu → «أين تُحفظ بيانات العيادة؟» → confirm the folder opens and contains `zuha.db`.
-5. Enter the real price list and the confirmed doctor percentages.
+5. Enter the confirmed doctor percentages and the rest of «إعدادات الحساب».
+   (There is no price list — «قائمة الأسعار» was removed 2026-08-19; every case is priced
+   when it is opened. See `docs/OWNER-NOTES.md` §7.)
 6. Copy the data folder to a USB stick and confirm it opens — before the clinic relies on it.

@@ -112,8 +112,8 @@ patches only what it is given, so existing values survive.
 
 ## 7. Tour on every screen + motion
 
-Tours added for `/patients`, `/implants`, `/ortho`, `/debts`, `/expenses`, `/cash`, `/prices`,
-`/audit`, `/help`, and a day-navigation step for `/appointments` — with `data-tour` anchors on
+Tours added for `/patients`, `/implants`, `/ortho`, `/debts`, `/expenses`, `/cash`, `/prices`
+(that screen was removed 2026-08-19 and its tour went with it), `/audit`, `/help`, and a day-navigation step for `/appointments` — with `data-tour` anchors on
 each screen. Detail routes deliberately have none; there «؟» opens الدليل. Half-coverage was
 worse than none: staff stop pressing a button that behaves differently each time.
 

@@ -4,7 +4,8 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import fs from "node:fs";
 import path from "node:path";
-import { backupsDir } from "@/lib/paths";
+import Database from "better-sqlite3";
+import { backupsDir, databasePath, pendingRestorePath } from "@/lib/paths";
 import { updateSettings, updateDoctor } from "@/lib/mutations";
 import { getSettings } from "@/lib/server-utils";
 import { verifyPin, hashPin } from "@/lib/crypto";
@@ -188,37 +189,7 @@ export async function backupDb(): Promise<BackupState> {
   }
 }
 
-// ── البيانات التجريبية ───────────────────────────────────────────────────────
 export type DemoState = { ok?: boolean; error?: string; message?: string };
-
-/**
- * Fill an EMPTY database with the training dataset.
- *
- * The emptiness check is the whole safety story: once a clinic has entered even
- * one real patient, adding fictional money to the same books is unrecoverable
- * without a wipe. So this refuses rather than merges, and the refusal says why.
- */
-export async function loadDemoData(): Promise<DemoState> {
-  await requireAuth();
-  const { fillDemoData, isDatabaseEmpty } = await import("@/lib/db/demo");
-  if (!isDatabaseEmpty()) {
-    return {
-      error:
-        "توجد سجلات في النظام بالفعل. التعبئة التجريبية تعمل على نظام فارغ فقط — " +
-        "امسح كل السجلات أولاً إذا كنت تريد بيانات تدريب.",
-    };
-  }
-  try {
-    const r = fillDemoData();
-    revalidateAll();
-    return {
-      ok: true,
-      message: `تم تحميل ${r.patients} مريض، ${r.cases} حالة، ${r.payments} دفعة، ${r.appointments} موعد.`,
-    };
-  } catch (e) {
-    return { error: e instanceof Error ? e.message : "تعذّر تحميل البيانات التجريبية." };
-  }
-}
 
 /**
  * Delete every record and start clean. Keeps doctors, prices, settings, PIN.
@@ -242,7 +213,11 @@ export async function wipeRecords(
       message: `تم حذف ${removed.patients} مريض و${removed.payments} دفعة. الأطباء والأسعار ورمز الدخول لم تتغيّر.`,
     };
   } catch (e) {
-    return { error: e instanceof Error ? e.message : "تعذّر مسح السجلات." };
+    // 🔴 كان يُعيد `e.message` مباشرة، فظهرت رسالة قاعدة بيانات بالإنجليزية
+    // («FOREIGN KEY constraint failed») على شاشة عربية لا تملك ما تفعله بها.
+    // التفصيل التقني يبقى في سجل الخادم، والعيادة تقرأ جملة مفهومة. [2026-08-28]
+    console.error("wipeRecords failed:", e);
+    return { error: "تعذّر مسح السجلات. لم يُحذف شيء — أعد المحاولة أو راجع الدعم." };
   }
 }
 
@@ -263,6 +238,126 @@ function revalidateAll(): void {
     "/settings",
   ]) {
     revalidatePath(p);
+  }
+}
+
+// ── الاستعادة ────────────────────────────────────────────────────────────────
+export type RestoreState = { ok?: boolean; error?: string; message?: string };
+
+/** Backups are named by `backupDb`; nothing else is a candidate for restoring. */
+const BACKUP_NAME = /^zuha-[0-9TZ.-]+\.db$/;
+
+/**
+ * Stage a saved backup to replace the live database on the next start.
+ *
+ * 🔴 Deliberately does NOT restore in place. `better-sqlite3` holds the file
+ * open for as long as the server runs, so overwriting it now would leave every
+ * screen reading a file that no longer exists — and WAL would replay the old
+ * rows on top of the restored ones. The file is copied to a pending slot and
+ * `applyPendingRestore()` swaps it in before the next connection opens.
+ *
+ * Three guards, in order, because this is the one button that can destroy a
+ * clinic's records:
+ *   1. the name must be one `backupDb` wrote, and must be a bare filename —
+ *      a path is never joined blindly onto the backups folder;
+ *   2. the file is opened read-only and checked for the tables the app needs,
+ *      so a truncated or unrelated file is refused instead of booting an app
+ *      with no records;
+ *   3. the CURRENT database is backed up first, so choosing the wrong file is
+ *      undoable by restoring the safety copy.
+ */
+export async function restoreBackup(
+  _prev: RestoreState,
+  formData: FormData,
+): Promise<RestoreState> {
+  await requireAuth();
+
+  const name = String(formData.get("name") ?? "").trim();
+  if (String(formData.get("confirm") ?? "").trim() !== "استعادة") {
+    return { error: "اكتب كلمة «استعادة» للتأكيد." };
+  }
+  // [1] A bare, known-shaped filename — never a path.
+  if (!name || name !== path.basename(name) || !BACKUP_NAME.test(name)) {
+    return { error: "اسم النسخة غير صالح." };
+  }
+  const source = path.join(backupsDir(), name);
+  if (!fs.existsSync(source)) {
+    return { error: "النسخة غير موجودة. حدّث الصفحة وجرّب مرة أخرى." };
+  }
+
+  // [2] Refuse anything that is not a Zuha database.
+  const missing = missingTables(source);
+  if (missing === null) {
+    return { error: "الملف ليس قاعدة بيانات سليمة — لن تُستعمل." };
+  }
+  if (missing.length > 0) {
+    return {
+      error: `النسخة ناقصة (${missing.join("، ")}) — لن تُستعمل حفاظاً على سجلاتك.`,
+    };
+  }
+
+  try {
+    // [3] The current records, before anything is staged.
+    const safety = await backupDb();
+    if (!safety.ok) {
+      return { error: "تعذّر حفظ نسخة من السجلات الحالية، فأُلغيت الاستعادة." };
+    }
+    fs.copyFileSync(source, pendingRestorePath());
+    revalidateSettings();
+    return {
+      ok: true,
+      message:
+        `ستُستعاد النسخة «${name}» عند تشغيل البرنامج القادم. ` +
+        `أغلق البرنامج الآن وافتحه من جديد. ` +
+        `سجلاتك الحالية محفوظة في «${path.basename(safety.file)}» إن أردت التراجع.`,
+    };
+  } catch (e) {
+    console.error("restoreBackup failed:", e);
+    return { error: "تعذّر تجهيز الاستعادة. لم يتغيّر شيء في سجلاتك." };
+  }
+}
+
+/** Cancel a staged restore that has not been applied yet. */
+export async function cancelRestore(): Promise<RestoreState> {
+  await requireAuth();
+  const pending = pendingRestorePath();
+  if (!fs.existsSync(pending)) return { ok: true, message: "لا توجد استعادة معلّقة." };
+  try {
+    fs.rmSync(pending);
+    revalidateSettings();
+    return { ok: true, message: "أُلغيت الاستعادة. سيفتح البرنامج على سجلاتك الحالية." };
+  } catch (e) {
+    console.error("cancelRestore failed:", e);
+    return { error: "تعذّر إلغاء الاستعادة." };
+  }
+}
+
+/** Is a restore waiting for the next start? Read helper for the Settings page. */
+export async function pendingRestore(): Promise<string | null> {
+  await requireAuth();
+  const pending = pendingRestorePath();
+  return fs.existsSync(pending) ? path.basename(databasePath()) : null;
+}
+
+/**
+ * Tables the app cannot run without. Returns the missing ones, or `null` when
+ * the file will not open as a database at all.
+ */
+function missingTables(file: string): string[] | null {
+  const REQUIRED = ["settings", "doctors", "patients", "cases", "payments"];
+  let conn: Database.Database | null = null;
+  try {
+    conn = new Database(file, { readonly: true, fileMustExist: true });
+    const present = new Set(
+      (conn.prepare("select name from sqlite_master where type = 'table'").all() as {
+        name: string;
+      }[]).map((r) => r.name),
+    );
+    return REQUIRED.filter((t) => !present.has(t));
+  } catch {
+    return null;
+  } finally {
+    conn?.close();
   }
 }
 

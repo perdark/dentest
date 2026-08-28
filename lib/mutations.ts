@@ -1093,6 +1093,8 @@ export interface WipeCounts {
   cashMovements: number;
   settlements: number;
   xrayFilms: number;
+  caseTeeth: number;
+  labEntries: number;
 }
 
 /**
@@ -1124,12 +1126,27 @@ export const wipeAllRecords = atomicMutation((note: string): WipeCounts => {
     // الفيلم لا يرتبط بمريض، فلا تحذفه سلسلةُ الحذف تلقائياً — ولو بقي لبقي
     // دخل أشعة تجريبي في دفاتر العيادة الحقيقية إلى الأبد. [2026-08-25]
     xrayFilms: count(db.select({ id: xrayFilms.id }).from(xrayFilms).all()),
+    // 🔴 مخطط الأسنان يشير إلى الحالة، والمفاتيح الأجنبية مفعّلة — فحذف الحالات
+    // قبل حذف علاماتها كان يرمي «FOREIGN KEY constraint failed» ويُلغي المسح
+    // كلّه. يكفي مخطط واحد محفوظ من `/cases/[id]/teeth` كي يتعطّل المسح، وهو
+    // أول خطوة في إجراء التسليم. [2026-08-28]
+    caseTeeth: count(db.select({ id: caseTeeth.id }).from(caseTeeth).all()),
+    // 🔴 قيود المختبر كانت تنجو من المسح بصمت: لا شيء يشير إليها فلا ترمي
+    // خطأً، فتبقى مستحقات مختبر تجريبية تظهر في «الأطباء» ودفتر المختبرات
+    // كلها على أنها ديون حقيقية. نفس سبب حذف الأفلام أعلاه. [2026-08-28]
+    labEntries: count(db.select({ id: labEntries.id }).from(labEntries).all()),
   };
 
   // Children before parents — foreign keys are ON.
   db.delete(payments).run();
   db.delete(appointments).run();
+  // case_teeth → cases, so it must go first or the whole wipe rolls back.
+  db.delete(caseTeeth).run();
   db.delete(cases).run();
+  // lab_entries → patients (optional column, unused by any form today) as well
+  // as doctors, which survive. Before patients, so it stays safe if that column
+  // is ever wired up.
+  db.delete(labEntries).run();
   db.delete(patients).run();
   db.delete(expenses).run();
   db.delete(cashMovements).run();

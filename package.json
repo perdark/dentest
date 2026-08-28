@@ -15,12 +15,12 @@
     "test:audit": "NODE_OPTIONS=--conditions=react-server tsx --test tests/audited-mutations.test.ts",
     "test:xrays": "NODE_OPTIONS=--conditions=react-server tsx --test tests/xray-income.test.ts",
     "test:ortho": "NODE_OPTIONS=--conditions=react-server tsx --test tests/ortho-open-total.test.ts",
-    "test": "npm run test:settlement && npm run test:payments && npm run test:audit && npm run test:xrays && npm run test:ortho && npm run test:lab",
+    "test": "npm run test:settlement && npm run test:payments && npm run test:audit && npm run test:xrays && npm run test:ortho && npm run test:lab && npm run test:dates && npm run test:wipe && npm run test:restore",
     "verify": "rm -f verify.db verify.db-shm verify.db-wal && ZUHA_DB=./verify.db drizzle-kit migrate && ZUHA_DB=./verify.db tsx lib/db/seed.ts && ZUHA_DB=./verify.db NODE_OPTIONS=--conditions=react-server tsx scripts/verify.ts",
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",
     "e2e:report": "playwright show-report",
-    "e2e:server": "rm -f e2e.db e2e.db-shm e2e.db-wal && ZUHA_DB=./e2e.db drizzle-kit migrate && ZUHA_DB=./e2e.db tsx lib/db/seed.ts && ZUHA_DB=./e2e.db ZUHA_BACKUPS_DIR=./e2e-backups next dev -p 3100",
+    "e2e:server": "rm -f e2e.db e2e.db-shm e2e.db-wal && ZUHA_DB=./e2e.db drizzle-kit migrate && ZUHA_DB=./e2e.db tsx lib/db/seed.ts && ZUHA_DB=./e2e.db ZUHA_BACKUPS_DIR=./e2e-backups ZUHA_DIST_DIR=.next-e2e next dev -p 3100",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:seed": "tsx lib/db/seed.ts",
@@ -32,7 +32,10 @@
     "app:start": "electron .",
     "dist:win": "npm run build && ZUHA_TARGET_PLATFORM=win32 ZUHA_TARGET_ARCH=x64 npm run stage && electron-builder --win --x64",
     "dist:linux": "npm run app:build && electron-builder --linux dir",
-    "test:lab": "NODE_OPTIONS=--conditions=react-server tsx --test tests/lab-dues.test.ts"
+    "test:lab": "NODE_OPTIONS=--conditions=react-server tsx --test tests/lab-dues.test.ts",
+    "test:dates": "NODE_OPTIONS=--conditions=react-server tsx --test tests/date-display.test.ts",
+    "test:wipe": "NODE_OPTIONS=--conditions=react-server tsx --test tests/wipe-records.test.ts",
+    "test:restore": "NODE_OPTIONS=--conditions=react-server tsx --test tests/backup-restore.test.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",

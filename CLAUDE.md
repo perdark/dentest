@@ -20,13 +20,17 @@ Next.js 16 (App Router, RSC, server actions) · TypeScript · Tailwind v4 · sha
    caller). It is a different number from `cases.labCost`; confusing the two silently deducts money
    from doctors' shares. See `docs/OWNER-NOTES.md` §9 + `tests/lab-dues.test.ts`.
 5. **Layer 2 numbers are UNCONFIRMED** (commission %, lab/% formula, 5M rule, salaries) — they live in Settings, editable, never hardcoded in a screen. They no longer carry "غير مؤكد" badges: build-phase caveats are not clinic-facing copy. What is unconfirmed is recorded in `docs/OWNER-NOTES.md` instead.
-6. **Nothing in the UI tells the clinic it is looking at a test system.** No demo banner, no "غير مؤكد", no placeholder or TODO text. Demo data is loaded by `npm run demo` before handover, never from inside the app.
+6. **Nothing in the UI tells the clinic it is looking at a test system.** No demo banner, no "غير مؤكد", no placeholder or TODO text. Demo data is loaded by `npm run db:demo` before handover, never from inside the app.
 
 ## Commands
 - `npm run db:setup` — migrate + seed (run once; seeds 5 doctors, 11 treatment types, **default PIN 1234**). No prices are seeded — «قائمة الأسعار» was removed 2026-08-19 and every case is priced when it is opened. Doctors are seeded without a lab name; each is set from «الأطباء ← اسم الطبيب».
 - `npm run dev` — dev server. `npm run build && npm start` — production (what the clinic runs).
 - `npm run db:generate` — new migration after a schema change, then `npm run db:migrate`.
 - Backup: the **الإعدادات** page has a one-click button (writes `backups/zuha-<timestamp>.db`).
+- Restore: same page, «استعادة نسخة محفوظة». It **stages** the file and the swap happens on the
+  next start (`applyPendingRestore()` in `lib/paths.ts`, called before the connection opens) —
+  the DB cannot be replaced under a live better-sqlite3 handle. A safety copy of the current
+  records is taken first, so a wrong choice is undoable. See `tests/backup-restore.test.ts`.
 
 ## Testing — three layers, do not duplicate between them
 - `npm test` — money arithmetic in isolation (settlement, payments, audit, x-ray income,

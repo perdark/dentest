@@ -58,3 +58,46 @@ export function adoptLegacyDatabase(): void {
   fs.copyFileSync(legacy, target);
   if (fs.existsSync(legacy + "-wal")) fs.copyFileSync(legacy + "-wal", target + "-wal");
 }
+
+/**
+ * Where a restore waits between being chosen and being applied.
+ *
+ * ⚠️ A restore cannot happen while the app is running: `better-sqlite3` holds
+ * the database open, and replacing the file under a live connection gives you a
+ * process reading a file that no longer exists. So «استعادة» does not restore —
+ * it STAGES, writing the chosen backup here, and the swap happens on the next
+ * start before anything opens a connection. Same reasoning, and same timing, as
+ * `adoptLegacyDatabase` above.
+ *
+ * Sits beside the database rather than in a fixed folder so ZUHA_DB (tests,
+ * verify, e2e) carries the pending file with it and never touches clinic data.
+ */
+export function pendingRestorePath(): string {
+  return databasePath() + ".pending";
+}
+
+/**
+ * Swap in a staged restore. Returns true when one was applied.
+ *
+ * Must run BEFORE the database connection is opened, for the same reason as
+ * `adoptLegacyDatabase`.
+ *
+ * 🔴 The WAL sidecars are deleted FIRST, and that order is the whole point. A
+ * `-wal` file belongs to the database being replaced; left beside the restored
+ * file, SQLite would replay it on open and silently write the very rows the
+ * clinic restored in order to be rid of. Deleting them before the swap means a
+ * crash mid-way leaves the OLD database in place — which is why
+ * `restoreBackup` takes a safety copy of it before staging anything.
+ */
+export function applyPendingRestore(): boolean {
+  const pending = pendingRestorePath();
+  if (!fs.existsSync(pending)) return false;
+
+  const target = databasePath();
+  for (const sidecar of ["-wal", "-shm"]) {
+    if (fs.existsSync(target + sidecar)) fs.rmSync(target + sidecar);
+  }
+  // Replaces the destination on both POSIX and Windows.
+  fs.renameSync(pending, target);
+  return true;
+}

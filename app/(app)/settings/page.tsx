@@ -2,7 +2,7 @@ import { Settings } from "lucide-react";
 import type { Metadata } from "next";
 import { getSettings } from "@/lib/server-utils";
 import { listDoctors } from "@/lib/queries";
-import { listBackups } from "@/lib/actions/settings";
+import { listBackups, pendingRestore } from "@/lib/actions/settings";
 import { SettingsForms } from "./settings-forms";
 
 export const metadata: Metadata = { title: "الإعدادات" };
@@ -11,6 +11,7 @@ export default async function SettingsPage() {
   const s = getSettings();
   const doctors = listDoctors();
   const backups = await listBackups();
+  const pendingRestoreName = await pendingRestore();
 
   // Ship only display fields to the client component — never expose the
   // secret columns (pinHash / sessionSecret) in the RSC payload.
@@ -33,7 +34,12 @@ export default async function SettingsPage() {
         </p>
       </div>
 
-      <SettingsForms settings={settings} doctors={doctors} backups={backups} />
+      <SettingsForms
+        settings={settings}
+        doctors={doctors}
+        backups={backups}
+        pendingRestoreName={pendingRestoreName}
+      />
     </div>
   );
 }

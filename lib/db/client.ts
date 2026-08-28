@@ -5,11 +5,17 @@ import path from "node:path";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import * as schema from "./schema";
-import { adoptLegacyDatabase, databasePath } from "../paths";
+import { adoptLegacyDatabase, applyPendingRestore, databasePath } from "../paths";
 
 // Carry a pre-rename dentest.db over to zuha.db. Must happen before the
 // connection below, which would otherwise create an empty file first.
 adoptLegacyDatabase();
+
+// A restore chosen from «الإعدادات» is staged, not applied — the file cannot be
+// swapped under a live connection. This is the moment it lands, before anything
+// opens the database. Ordering matters: after the legacy adoption (so a restore
+// wins over an old dentest.db) and before the connection.
+applyPendingRestore();
 
 const dbPath = databasePath();
 // The data folder may not exist yet on a fresh install of the packaged app.
