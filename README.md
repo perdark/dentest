@@ -72,5 +72,7 @@ pm2 startup && pm2 save
 ```
 
 ---
-المواصفات الكاملة في `BRIEF.md`. قواعد البناء للمطوّر في `docs/CONVENTIONS.md`.
+المواصفات الكاملة في `BRIEF.md`. قواعد البناء للمطوّر في `docs/CONVENTIONS.md`،
+وخريطة المشروع كاملةً في `docs/ONBOARDING-FOR-CLAUDE.md`، ومراجعة الحالة في
+`docs/PROJECT-REVIEW-2026-09-21.md`.
 البنية: Next.js 16 + TypeScript + Tailwind v4 + shadcn (Base UI) + SQLite/Drizzle (better-sqlite3).
