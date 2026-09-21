@@ -12,11 +12,16 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { NativeSelect } from "@/components/forms/native-select";
 import { useActionToast } from "@/components/forms/use-action-toast";
 import { FormError } from "@/components/forms/form-error";
 import { MoneySummary } from "@/components/forms/money-summary";
 import { formatIQD, parseAmount } from "@/lib/format";
+import { PAYMENT_KIND_LABELS } from "@/lib/strings";
 import { recordDebtPayment, type PayState } from "@/lib/actions/debts";
+
+const PAYMENT_KINDS = ["session", "down_payment", "adjustment", "refund"] as const;
+type PaymentKind = (typeof PAYMENT_KINDS)[number];
 
 export function PayDialog({
   caseId,
@@ -31,18 +36,22 @@ export function PayDialog({
 }) {
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState("");
+  const [kind, setKind] = useState<PaymentKind>("session");
   const [state, formAction, pending] = useActionState<PayState, FormData>(
     recordDebtPayment,
     {},
   );
 
-  // أغلق الحوار وأكّد الإضافة بعد نجاحها.
+  // أغلق الحوار وأكّد الإضافة بعد نجاحها. الاسترجاع يُؤكَّد باسمه: التأكيد
+  // يُقرأ بعد إغلاق الحوار، ورسالة «تمت إضافة الدفعة» عن استرجاع تقرأ كأن
+  // المبلغ دخل. (`toast.success` يسبق `onSuccess`، فالنوع هنا هو المُرسَل.)
   useActionToast(
     state,
-    "تمت إضافة الدفعة بنجاح",
+    kind === "refund" ? "تم تسجيل الاسترجاع بنجاح" : "تمت إضافة الدفعة بنجاح",
     useCallback(() => {
       setOpen(false);
       setAmount("");
+      setKind("session");
     }, []),
   );
 
@@ -51,8 +60,17 @@ export function PayDialog({
   // الآن — وتضغط «حفظ الدفعة» عليه.
   function handleOpenChange(next: boolean) {
     setOpen(next);
-    if (!next) setAmount("");
+    if (!next) {
+      setAmount("");
+      // النوع يعود إلى «جلسة» مع المبلغ: «استرجاع» متروكاً من فتحة سابقة يقلب
+      // إشارة الدفعة التالية بلا أن ينتبه أحد.
+      setKind("session");
+    }
   }
+
+  // الاسترجاع يزيد الرصيد المطلوب بدل أن يُنقصه — نفس ما تفعله طبقة الدفعات.
+  const afterPayment =
+    remaining + (kind === "refund" ? 1 : -1) * parseAmount(amount);
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -93,13 +111,35 @@ export function PayDialog({
               <MoneySummary
                 figures={[
                   {
-                    label: "المتبقي بعد هذه الدفعة",
-                    amount: remaining - parseAmount(amount),
+                    label:
+                      kind === "refund"
+                        ? "المتبقي بعد الاسترجاع"
+                        : "المتبقي بعد هذه الدفعة",
+                    amount: afterPayment,
                     emphasis: true,
                   },
                 ]}
               />
             ) : null}
+          </div>
+
+          {/* النوع: «جلسة» في الغالب، ولذلك هو المبدئي. «استرجاع» هو الوحيد
+              الذي يزيد الرصيد بدل أن يُنقصه — الطبقة الوسطى تحفظه بالسالب
+              وتمنعه من تجاوز ما قُبض فعلاً. */}
+          <div className="space-y-2">
+            <Label htmlFor={`kind-${caseId}`}>النوع</Label>
+            <NativeSelect
+              id={`kind-${caseId}`}
+              name="kind"
+              value={kind}
+              onChange={(e) => setKind(e.target.value as PaymentKind)}
+            >
+              {PAYMENT_KINDS.map((k) => (
+                <option key={k} value={k}>
+                  {PAYMENT_KIND_LABELS[k]}
+                </option>
+              ))}
+            </NativeSelect>
           </div>
 
           <div className="space-y-2">

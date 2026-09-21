@@ -860,7 +860,9 @@ export const recordCashMovement = atomicMutation((input: {
 // ── Expenses (سجل الصرفيات) — period-aware so closed-month edits go stale [D4] ─
 export const addExpense = atomicMutation((input: {
   expenseDate: string;
-  category: "food" | "water" | "dental_materials" | "dental_lab" | "installments" | "other";
+  // Derived from the schema so the category list lives in exactly one place;
+  // it was previously repeated here and drifted the moment a category was added.
+  category: (typeof expenses.$inferInsert)["category"];
   amount: number;
   note?: string | null;
 }): number => {
@@ -925,6 +927,8 @@ export const updateDoctor = atomicMutation((
     commissionPct: number | null;
     isActive: boolean;
     doesOrtho: boolean;
+    doesImplants: boolean;
+    doesNormal: boolean;
     labName: string | null;
   }>,
 ): void => {
@@ -938,6 +942,8 @@ export const createDoctor = atomicMutation((input: {
   name: string;
   commissionPct?: number | null;
   doesOrtho?: boolean;
+  doesImplants?: boolean;
+  doesNormal?: boolean;
   labName?: string | null;
 }): number => {
   const maxOrder =
@@ -948,6 +954,8 @@ export const createDoctor = atomicMutation((input: {
       name: input.name.trim(),
       commissionPct: input.commissionPct ?? null,
       doesOrtho: input.doesOrtho ?? false,
+      doesImplants: input.doesImplants ?? true,
+      doesNormal: input.doesNormal ?? true,
       labName: input.labName?.trim() || null,
       sortOrder: maxOrder + 1,
     })

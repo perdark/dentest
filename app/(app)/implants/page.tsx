@@ -35,7 +35,7 @@ export default async function ImplantsPage({
   const sp = await searchParams;
   const q = sp.q?.trim() ?? "";
   const rows = implantIndex(q);
-  const doctors = listDoctors({ activeOnly: true }).map((d) => ({
+  const doctors = listDoctors({ activeOnly: true, does: "implant" }).map((d) => ({
     id: d.id,
     name: d.name,
   }));

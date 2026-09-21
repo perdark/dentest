@@ -18,11 +18,15 @@ const DEFAULT_PIN = "1234";
 // «غير مؤكد» badge appear in الإعدادات — hardcoding a guess here would make an
 // invented number look confirmed. The settlement falls back to
 // settings.defaultCommissionPct until the clinic gives the real figures. [C1]
+// doesImplants / doesNormal decide which doctors «الزراعة» and «الدفتر اليومي»
+// offer. د. زهرة is orthodontics only, one day a week (BRIEF.md), so she is the
+// one doctor excluded from both — she was previously selectable for implants and
+// for normal work, which would have put her production in the wrong bucket.
 const DOCTORS = [
-  { name: "د. عدي", isOwner: true, doesOrtho: false, commissionPct: null, sortOrder: 1 },
-  { name: "د. علي قاسم", isOwner: false, doesOrtho: false, commissionPct: null, sortOrder: 2 },
-  { name: "د. علي دوبرا", isOwner: false, doesOrtho: false, commissionPct: null, sortOrder: 3 },
-  { name: "د. زهرة", isOwner: false, doesOrtho: true, commissionPct: null, sortOrder: 5 },
+  { name: "د. عدي", isOwner: true, doesOrtho: false, doesImplants: true, doesNormal: true, commissionPct: null, sortOrder: 1 },
+  { name: "د. علي قاسم", isOwner: false, doesOrtho: false, doesImplants: true, doesNormal: true, commissionPct: null, sortOrder: 2 },
+  { name: "د. علي دوبرا", isOwner: false, doesOrtho: false, doesImplants: true, doesNormal: true, commissionPct: null, sortOrder: 3 },
+  { name: "د. زهرة", isOwner: false, doesOrtho: true, doesImplants: false, doesNormal: false, commissionPct: null, sortOrder: 5 },
 ];
 
 // No `price` column here on purpose: every case is priced when it is opened.

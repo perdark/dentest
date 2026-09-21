@@ -23,24 +23,27 @@ fs.mkdirSync(path.dirname(out), { recursive: true });
 // A half-built demo from an earlier run would fail `isDatabaseEmpty` and abort.
 for (const suffix of ["", "-wal", "-shm"]) fs.rmSync(out + suffix, { force: true });
 
-const run = (cmd, args, extraEnv = {}) =>
-  execFileSync(cmd, args, {
+const run = (entry, args, extraEnv = {}) =>
+  // Always through process.execPath: the node_modules/.bin entries are
+  // extensionless shell scripts that Windows cannot exec, so calling them
+  // directly fails with ENOENT. [packaging]
+  execFileSync(process.execPath, [entry, ...args], {
     cwd: root,
     stdio: "inherit",
     env: { ...process.env, ZUHA_DB: out, ...extraEnv },
   });
 
-const bin = (name) => path.join(root, "node_modules", ".bin", name);
+const bin = (pkg, entry) => path.join(root, "node_modules", pkg, entry);
 
 console.log("→ migrating demo database");
-run(bin("drizzle-kit"), ["migrate"]);
+run(bin("drizzle-kit", "bin.cjs"), ["migrate"]);
 
 console.log("→ seeding doctors, treatments, settings, PIN");
-run(bin("tsx"), ["lib/db/seed.ts"]);
+run(bin("tsx", "dist/cli.mjs"), ["lib/db/seed.ts"]);
 
 console.log("→ filling three months of fictional clinic life");
 // The demo generator writes through the mutations layer, which is server-only.
-run(bin("tsx"), ["scripts/demo.ts"], { NODE_OPTIONS: "--conditions=react-server" });
+run(bin("tsx", "dist/cli.mjs"), ["scripts/demo.ts"], { NODE_OPTIONS: "--conditions=react-server" });
 
 /*
  * Fold the write-ahead log back into the main file and leave WAL mode behind.

@@ -1,17 +1,14 @@
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, CalendarDays, StickyNote } from "lucide-react";
 import {
-  collectableCaseCount,
   dailyLedger,
   listDoctors,
-  listTreatmentTypes,
-  openCasesBrief,
+  normalTreatmentSuggestions,
   xrayFilmsForDate,
 } from "@/lib/queries";
 import { todayISO, isValidISODate, formatDateAr } from "@/lib/dates";
 import { formatIQD } from "@/lib/format";
 import {
-  medicalFlagsMarker,
   PAYMENT_KIND_LABELS,
   XRAY_BUCKET,
   XRAY_PLACEMENT_LABELS,
@@ -54,21 +51,14 @@ export default async function DailyPage({
   // اليوم كي يطابق الدفتر ما في الدرج. [قرار العيادة 2026-08-25][D9]
   const films = xrayFilmsForDate(date);
   const filmsTotal = films.reduce((s, f) => s + f.price, 0);
-  const doctors = listDoctors({ activeOnly: true });
+  // «الدفتر اليومي» opens normal-work cases only — implants, ortho and x-rays
+  // each have their own screen — so it offers only doctors who do normal work.
+  const doctors = listDoctors({ activeOnly: true, does: "normal" });
   // الأشعة لها سجلها الخاص، ودخلها للعيادة لا للطبيب — فلا تُفتح من هنا. [D9]
-  const treatments = listTreatmentTypes().filter(
-    (t) => !t.isImplant && !t.isOrtho && t.settlementBucket !== XRAY_BUCKET,
-  );
-  // Capped list — the dialog searches the server for anything beyond it. [D3]
-  const openCases = openCasesBrief().map((c) => ({
-    id: c.id,
-    // نفس صيغة نتائج البحث في searchCollectableCases — القائمتان تُقرآن كواحدة.
-    label:
-      `${c.patientName} · ${c.treatment} · متبقٍ ${formatIQD(c.remaining)}` +
-      medicalFlagsMarker(c.patientMedicalFlags),
-    remaining: c.remaining,
-  }));
-  const totalCollectable = collectableCaseCount();
+  // The bucket filter lives in the query rather than here, so the rule is
+  // stated once in SQL; the query also orders by the last time each treatment
+  // was actually used, so what this clinic does every day sits at the top.
+  const treatments = normalTreatmentSuggestions();
 
   // Group ledger lines by doctor (rows already sorted by doctor sortOrder).
   const groups = new Map<
@@ -96,13 +86,7 @@ export default async function DailyPage({
           <p className="text-base font-medium">{formatDateAr(date)}</p>
         </div>
         <div data-tour="daily-add">
-          <EntryDialog
-            doctors={doctors}
-            treatments={treatments}
-            date={date}
-            openCases={openCases}
-            totalCollectable={totalCollectable}
-          />
+          <EntryDialog doctors={doctors} treatments={treatments} date={date} />
         </div>
       </div>
 

@@ -64,6 +64,13 @@
       "when": 1787840432072,
       "tag": "0008_wandering_lilandra",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1790027990388,
+      "tag": "0009_noisy_killraven",
+      "breakpoints": true
     }
   ]
 }

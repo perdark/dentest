@@ -17,6 +17,14 @@ export const doctors = sqliteTable("doctors", {
   name: text("name").notNull(),
   isOwner: integer("is_owner", { mode: "boolean" }).notNull().default(false),
   doesOrtho: integer("does_ortho", { mode: "boolean" }).notNull().default(false),
+  // What work this doctor actually takes. `doesOrtho` came first and drives
+  // «التقويم»; these two complete the set so «الدفتر اليومي» and «الزراعة» can
+  // offer only the doctors who do that kind of work instead of the whole list.
+  // Both default to true so an existing clinic keeps every doctor selectable
+  // until someone narrows it from «الأطباء» — silently hiding doctors after an
+  // upgrade would look like data loss.
+  doesImplants: integer("does_implants", { mode: "boolean" }).notNull().default(true),
+  doesNormal: integer("does_normal", { mode: "boolean" }).notNull().default(true),
   isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
   // Commission percent (0-100). NULL = UNCONFIRMED with clinic.
   commissionPct: integer("commission_pct"),
@@ -105,6 +113,19 @@ export const treatmentTypes = sqliteTable("treatment_types", {
 });
 
 // ── Price list (one active price per treatment type) ────────────────────────
+/**
+ * DORMANT ON PURPOSE — do not "finish" this feature.
+ *
+ * «قائمة الأسعار» was removed on 2026-08-19: this clinic's price varies per
+ * patient, so every case is priced when it is opened and the system never
+ * suggests a figure. The table was left in place rather than migrated away, and
+ * nothing in lib/, app/ or components/ reads or writes it.
+ *
+ * It is recorded here because the decision lives in docs/OWNER-NOTES.md §7 and
+ * BRIEF.md — neither of which anyone is reading while looking at a table
+ * definition. An unused table with an obviously missing screen is exactly the
+ * shape someone completes by accident. [dormant]
+ */
 export const priceList = sqliteTable("price_list", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   treatmentTypeId: integer("treatment_type_id")
@@ -260,7 +281,15 @@ export const expenses = sqliteTable(
     id: integer("id").primaryKey({ autoIncrement: true }),
     expenseDate: text("expense_date").notNull(), // YYYY-MM-DD
     category: text("category", {
-      enum: ["food", "water", "dental_materials", "dental_lab", "installments", "other"],
+      enum: [
+        "food",
+        "water",
+        "general",
+        "dental_materials",
+        "dental_lab",
+        "installments",
+        "other",
+      ],
     }).notNull(),
     amount: integer("amount").notNull(),
     note: text("note"),

@@ -6,42 +6,21 @@ import {
   findOrCreatePatient,
   findOrCreateTreatmentType,
   createCaseWithPayment,
-  paymentFailureMessage,
-  recordCasePayment,
   treatmentTypeFailureMessage,
 } from "@/lib/mutations";
-import { formatIQD, parseAmount } from "@/lib/format";
+import { parseAmount } from "@/lib/format";
 import { isValidISODate } from "@/lib/dates";
 import { requireAuth } from "@/lib/auth";
-import { openCasesBrief } from "@/lib/queries";
-import { medicalFlagsMarker } from "@/lib/strings";
 
 export type VisitFormState = { ok?: boolean; error?: string };
 
 /**
- * `remaining` travels as a number beside the label, never parsed back out of
- * it: the live line under the amount field does arithmetic with it, and text
- * that exists to be read must not double as a data channel.
+ * «الدفتر اليومي» opens new cases only. A payment against an already-open case
+ * is recorded from «الديون ← إضافة دفعة» (`recordDebtPayment`), which picks the
+ * case by its own balance — this file used to carry a second entry point for
+ * the same money and it was removed 2026-09-22.
  */
-export type CaseOption = { id: number; label: string; remaining: number };
-
-/**
- * Server-side search for the payment picker. The clinic has hundreds of open
- * implant cards, so the dialog cannot ship them all to the browser. [D3]
- */
-export async function searchCollectableCases(q: string): Promise<CaseOption[]> {
-  await requireAuth();
-  const term = typeof q === "string" ? q.slice(0, 60) : "";
-  return openCasesBrief(term).map((c) => ({
-    id: c.id,
-    label:
-      `${c.patientName} · ${c.treatment} · متبقٍ ${formatIQD(c.remaining)}` +
-      medicalFlagsMarker(c.patientMedicalFlags),
-    remaining: c.remaining,
-  }));
-}
-
-// ── Mode A: new case + (optional) first payment ──────────────────────────────
+// ── New case + (optional) first payment ──────────────────────────────────────
 export async function createVisitNewCase(
   _prev: VisitFormState,
   formData: FormData,
@@ -94,42 +73,6 @@ export async function createVisitNewCase(
     totalPrice: total,
     firstPayment: paidNow > 0 ? { amount: paidNow, kind: "down_payment" } : undefined,
   });
-
-  revalidatePath("/daily");
-  revalidatePath("/dashboard");
-  return { ok: true };
-}
-
-// ── Mode B: payment on an existing open case ─────────────────────────────────
-export async function addVisitPayment(
-  _prev: VisitFormState,
-  formData: FormData,
-): Promise<VisitFormState> {
-  await requireAuth();
-  const parsed = z
-    .object({
-      caseId: z.coerce.number(),
-      amount: z.string(),
-      kind: z.enum(["session", "down_payment", "adjustment", "refund"]),
-      date: z.string(),
-    })
-    .safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return { error: "تحقق من الحقول المدخلة" };
-  const d = parsed.data;
-
-  if (!Number.isInteger(d.caseId) || d.caseId <= 0) return { error: "اختر الحالة" };
-  if (!isValidISODate(d.date)) return { error: "التاريخ غير صحيح" };
-
-  const amount = parseAmount(d.amount);
-  if (amount <= 0) return { error: "أدخل مبلغاً صحيحاً" };
-
-  const result = recordCasePayment({
-    caseId: d.caseId,
-    amount,
-    kind: d.kind,
-    paidDate: d.date,
-  });
-  if (!result.ok) return { error: paymentFailureMessage(result.reason) };
 
   revalidatePath("/daily");
   revalidatePath("/dashboard");

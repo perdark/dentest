@@ -9,10 +9,11 @@ import { requireAuth } from "@/lib/auth";
 
 export type ExpenseFormState = { ok?: boolean; error?: string };
 
-// الفئات الست المسموح بها (مطابقة لمخطط قاعدة البيانات).
+// الفئات السبع المسموح بها (مطابقة لمخطط قاعدة البيانات).
 const CATEGORY = z.enum([
   "food",
   "water",
+  "general",
   "dental_materials",
   "dental_lab",
   "installments",

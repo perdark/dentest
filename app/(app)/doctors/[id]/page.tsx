@@ -306,6 +306,8 @@ export default async function DoctorPage({
             commissionPct={doctor.commissionPct}
             labName={doctor.labName}
             doesOrtho={doctor.doesOrtho}
+            doesImplants={doctor.doesImplants}
+            doesNormal={doctor.doesNormal}
             isActive={doctor.isActive}
           />
         </CardContent>

@@ -4,6 +4,28 @@ Session was a clinic-facing polish pass driven by a review of the running app, p
 root-cause fix that explains several "it doesn't work" reports. **Everything below is done and
 verified in a real browser.** Nothing is committed — the whole session is in the working tree.
 
+> ### ⚠️ Correction added 2026-09-22 — two items below never reached the code
+>
+> This document is kept as the record of what that session did. Two of its claims were
+> checked against the tree on 2026-09-22 and do not hold. §10 item 4 says nothing was
+> committed; what followed was a **partial** commit, and these two were the casualties.
+>
+> 1. **§1 — the «الديون» → «المستحقات» rename did not land.** «المستحقات» appears in
+>    **zero** files; «الديون» is still in twelve, including the nav (`lib/strings.ts`),
+>    the dashboard tile, `/help` and the tour. §9's browser verification of this line no
+>    longer describes the running app. The other two renames in §1 (شكوى → ملاحظة على
+>    الحالة, and the أكل/ماء merge) **did** land. *(The expense merge was then reversed on
+>    2026-09-22 at the clinic's request — see `lib/strings.ts`.)*
+>
+> 2. **§9 — `useDialog()` is not wired in.** `components/ui/use-dialog.ts` was imported by
+>    nothing. Dialogs *do* close correctly, but through `useActionToast`, which §2
+>    describes as owning "the close/reset side effect" — it superseded `useDialog` inside
+>    this same session. The orphaned hook was deleted on 2026-09-22.
+>
+> Everything else in §2–§8 was spot-checked and is present: `use-action-toast.ts`,
+> `day-picker.tsx`, `empty-value.tsx`, the expense delete confirmation, `allowedDevOrigins`
+> and the `nativeButton={false}` fixes are all in the tree.
+
 The previous handoff's open item (dialogs not closing after save) is **closed**: `useDialog()` is
 wired in, and this session re-verified it — saving a patient closes the dialog, shows a
 confirmation, and the row appears. See §9.
@@ -72,6 +94,11 @@ Toaster: top-centre, 3.5s, close button (`components/providers.tsx`).
 Dialog titled «إضافة قيد جديد» with tabs «جديد» / «دفعة» gave no way to tell what either does.
 Now: **«علاج جديد»** (opens a new case + its first payment) and **«دفعة على علاج سابق»** (adds a
 payment to an existing open case), with a `DialogDescription` stating the difference in one line.
+
+**Superseded 2026-09-22 (owner's call):** the «دفعة على علاج سابق» tab is gone. The daily dialog
+opens a new case only — no tab bar — and a payment on an already-open case is recorded from
+«الديون ← إضافة دفعة» (`recordDebtPayment`), which was always the other way in. `PaymentForm`,
+`addVisitPayment` and `searchCollectableCases` were deleted with it.
 
 ## 4. Date picker on /daily and /appointments
 

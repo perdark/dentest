@@ -21,6 +21,12 @@ function revalidateDoctors(id?: number) {
   revalidatePath("/doctors");
   if (id) revalidatePath(`/doctors/${id}`);
   revalidatePath("/settlement");
+  // The doctor pickers on these two screens are filtered by the capability
+  // checkboxes («زراعة» / «عمل عادي»), so a change here changes what they offer.
+  // Without this, a client-side navigation can serve a cached list and the
+  // doctor who was just ticked appears to be missing. [pickers]
+  revalidatePath("/daily");
+  revalidatePath("/implants");
 }
 
 // ── إضافة طبيب ───────────────────────────────────────────────────────────────
@@ -29,6 +35,8 @@ const createSchema = z.object({
   commissionPct: z.string().optional().default(""),
   labName: z.string().trim().optional().default(""),
   doesOrtho: z.string().optional(),
+  doesImplants: z.string().optional(),
+  doesNormal: z.string().optional(),
 });
 
 export async function addDoctor(
@@ -56,6 +64,8 @@ export async function addDoctor(
     name: d.name,
     commissionPct: pct,
     doesOrtho: d.doesOrtho === "on",
+    doesImplants: d.doesImplants === "on",
+    doesNormal: d.doesNormal === "on",
     labName: d.labName || null,
   });
 
@@ -70,6 +80,8 @@ const updateSchema = z.object({
   commissionPct: z.string().optional().default(""),
   labName: z.string().trim().optional().default(""),
   doesOrtho: z.string().optional(),
+  doesImplants: z.string().optional(),
+  doesNormal: z.string().optional(),
   isActive: z.string().optional(),
 });
 
@@ -98,6 +110,8 @@ export async function saveDoctor(
     commissionPct: pct,
     labName: d.labName || null,
     doesOrtho: d.doesOrtho === "on",
+    doesImplants: d.doesImplants === "on",
+    doesNormal: d.doesNormal === "on",
     isActive: d.isActive === "on",
   });
 

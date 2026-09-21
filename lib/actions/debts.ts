@@ -9,10 +9,23 @@ import { requireAuth } from "@/lib/auth";
 
 export type PayState = { ok?: boolean; error?: string };
 
-// ── إضافة دفعة لدين قائم (جلسة) ───────────────────────────────────────────────
+// ── إضافة دفعة لدين قائم ──────────────────────────────────────────────────────
+/**
+ * The four kinds the clinic can record against an open case. They moved here
+ * on 2026-09-22 with «دفعة على علاج سابق»: this screen is now the only way in,
+ * and a refund or a تسوية has to stay recordable. The kind travels to
+ * `recordCasePayment`, which owns what each one is allowed to do — a refund is
+ * capped at what was actually collected and is stored negative there, never
+ * here. [golden rule 1]
+ */
+const PAYMENT_KINDS = ["session", "down_payment", "adjustment", "refund"] as const;
+
 const schema = z.object({
   caseId: z.coerce.number().int().positive(),
   amount: z.string().trim().min(1, "أدخل المبلغ"),
+  // A missing or unknown kind is a جلسة — the same default the mutation uses,
+  // so an older form that posts no `kind` keeps behaving exactly as it did.
+  kind: z.enum(PAYMENT_KINDS).optional().default("session"),
   date: z.string().optional().default(""),
 });
 
@@ -37,7 +50,7 @@ export async function recordDebtPayment(
   const result = recordCasePayment({
     caseId: d.caseId,
     amount,
-    kind: "session",
+    kind: d.kind,
     paidDate: date,
   });
   if (!result.ok) return { error: paymentFailureMessage(result.reason) };

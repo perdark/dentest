@@ -26,6 +26,12 @@ Next.js 16 (App Router, RSC, server actions) · TypeScript · Tailwind v4 · sha
 - `npm run db:setup` — migrate + seed (run once; seeds 5 doctors, 11 treatment types, **default PIN 1234**). No prices are seeded — «قائمة الأسعار» was removed 2026-08-19 and every case is priced when it is opened. Doctors are seeded without a lab name; each is set from «الأطباء ← اسم الطبيب».
 - `npm run dev` — dev server. `npm run build && npm start` — production (what the clinic runs).
 - `npm run db:generate` — new migration after a schema change, then `npm run db:migrate`.
+- **No shell syntax in `package.json` scripts.** npm runs every script through cmd.exe on Windows
+  whatever shell you typed it in, so `VAR=value cmd`, `rm -f`, quoted globs and `$(…)` all break on
+  the machine this is built on. Anything needing environment variables or file cleanup goes in a
+  small `scripts/*.mjs` runner instead (`run-tsx.mjs`, `run-verify.mjs`, `e2e-server.mjs`,
+  `stage-app.mjs` — the last takes `--platform=`/`--arch=`/`--seed-db=` flags). Plain `cmd && cmd`
+  chains are fine.
 - Backup: the **الإعدادات** page has a one-click button (writes `backups/zuha-<timestamp>.db`).
 - Restore: same page, «استعادة نسخة محفوظة». It **stages** the file and the swap happens on the
   next start (`applyPendingRestore()` in `lib/paths.ts`, called before the connection opens) —

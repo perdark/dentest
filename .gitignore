@@ -82,3 +82,11 @@ verify.db-wal
 *.MOV
 *.m4a
 photo_*.jpg
+
+# Backups written by the Playwright suite. `scripts/e2e-server.mjs` points
+# ZUHA_BACKUPS_DIR here so a backup test can never write into the clinic's
+# real backups/ — the folder it produces is test output, not records.
+/e2e-backups/
+
+# Local scratch: preview databases and throwaway launchers. Never shipped.
+/.scratch/

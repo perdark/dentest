@@ -46,14 +46,30 @@ export const BUCKET_LABELS: Record<string, string> = {
  * Clinic-facing expense categories.
  *
  * `key` is what a new row stores; `absorbs` lists older keys that the same
- * category still has to display and total. «أكل» and «ماء» were two separate
- * categories at first — too blunt for the clinic's own books — and are now one
- * «مصاريف عامة». The `water` rows already in the database keep their stored
- * value (nothing is rewritten behind the clinic's back); they simply show and
- * add up under the merged category.
+ * category still has to display and total.
+ *
+ * The `food` category was relabelled «أكل» → «طعام» on 2026-09-22. The key did
+ * not change, so every row ever entered under «أكل» reads as «طعام» now with no
+ * migration — the label is display only, and this is exactly why the two are
+ * kept apart.
+ *
+ * «أكل» and «ماء» started as two categories, were merged into a single
+ * «مصاريف عامة» on 2026-08-14, and were split apart again on 2026-09-22 because
+ * the clinic wants to read the two figures separately. No data moved in either
+ * direction: the merge only ever changed a label, so `food` and `water` rows
+ * have been stored distinctly the whole time and the split needed no migration.
+ *
+ * «مصاريف عامة» keeps its own key rather than folding into «أكل». Rows entered
+ * while it was the merged label are not necessarily food, and relabelling them
+ * would assert something the clinic never said.
+ *
+ * `absorbs` is empty for every category today. It stays because it is the
+ * mechanism that lets a future merge display old keys without rewriting them.
  */
 export const EXPENSE_CATEGORIES = [
-  { key: "food", label: "مصاريف عامة", absorbs: ["water"] },
+  { key: "food", label: "طعام", absorbs: [] },
+  { key: "water", label: "ماء", absorbs: [] },
+  { key: "general", label: "مصاريف عامة", absorbs: [] },
   { key: "dental_materials", label: "مواد أسنان", absorbs: [] },
   { key: "dental_lab", label: "مختبر الأسنان", absorbs: [] },
   { key: "installments", label: "أقساط", absorbs: [] },

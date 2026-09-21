@@ -86,10 +86,27 @@ export function AddDoctorDialog() {
             <Input id="dr-lab" name="labName" autoComplete="off" className="h-11" />
           </div>
 
-          <label className="flex min-h-11 items-center gap-2 text-sm">
-            <input type="checkbox" name="doesOrtho" className="size-4" />
-            يعمل تقويم أسنان
-          </label>
+          {/* أي شغل يستلمه الطبيب — يحدّد بأي شاشة يظهر اسمه. */}
+          <fieldset className="space-y-1.5">
+            <legend className="text-sm font-medium">نوع العمل</legend>
+            <p className="text-muted-foreground text-xs">
+              يظهر اسم الطبيب في الشاشة الخاصة بكل نوع عمل مؤشَّر هنا.
+            </p>
+            <div className="flex flex-wrap gap-4">
+              <label className="flex min-h-11 items-center gap-2 text-sm">
+                <input type="checkbox" name="doesImplants" defaultChecked className="size-4" />
+                زراعة
+              </label>
+              <label className="flex min-h-11 items-center gap-2 text-sm">
+                <input type="checkbox" name="doesOrtho" className="size-4" />
+                تقويم
+              </label>
+              <label className="flex min-h-11 items-center gap-2 text-sm">
+                <input type="checkbox" name="doesNormal" defaultChecked className="size-4" />
+                عمل عادي
+              </label>
+            </div>
+          </fieldset>
 
           <FormError>{state.error}</FormError>
 
@@ -116,6 +133,8 @@ export function DoctorInfoForm({
   commissionPct,
   labName,
   doesOrtho,
+  doesImplants,
+  doesNormal,
   isActive,
 }: {
   id: number;
@@ -123,6 +142,8 @@ export function DoctorInfoForm({
   commissionPct: number | null;
   labName: string | null;
   doesOrtho: boolean;
+  doesImplants: boolean;
+  doesNormal: boolean;
   isActive: boolean;
 }) {
   const [state, formAction] = useActionState<DoctorState, FormData>(saveDoctor, {});
@@ -172,11 +193,29 @@ export function DoctorInfoForm({
         <label className="flex min-h-11 items-center gap-2 text-sm">
           <input
             type="checkbox"
+            name="doesImplants"
+            defaultChecked={doesImplants}
+            className="size-4"
+          />
+          زراعة
+        </label>
+        <label className="flex min-h-11 items-center gap-2 text-sm">
+          <input
+            type="checkbox"
             name="doesOrtho"
             defaultChecked={doesOrtho}
             className="size-4"
           />
-          يعمل تقويم أسنان
+          تقويم
+        </label>
+        <label className="flex min-h-11 items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            name="doesNormal"
+            defaultChecked={doesNormal}
+            className="size-4"
+          />
+          عمل عادي
         </label>
         <label className="flex min-h-11 items-center gap-2 text-sm">
           <input

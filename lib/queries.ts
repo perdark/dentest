@@ -54,10 +54,33 @@ export function hasAnyRecords(): boolean {
 }
 
 // ── Reference lists ─────────────────────────────────────────────────────────
-export function listDoctors(opts: { activeOnly?: boolean } = {}) {
+/** The three kinds of work a doctor can be marked for. Mirrors the settlement
+ *  buckets a doctor can earn in — «أشعة» is clinic income and has no doctor. [D9] */
+export type DoctorWork = "implant" | "ortho" | "normal";
+
+export function listDoctors(
+  opts: { activeOnly?: boolean; does?: DoctorWork } = {},
+) {
   const q = db.select().from(doctors).orderBy(doctors.sortOrder);
   const rows = q.all();
-  return opts.activeOnly ? rows.filter((d) => d.isActive) : rows;
+  const active = opts.activeOnly ? rows.filter((d) => d.isActive) : rows;
+  if (!opts.does) return active;
+
+  const does = opts.does;
+  const matching = active.filter((d) =>
+    does === "ortho" ? d.doesOrtho : does === "implant" ? d.doesImplants : d.doesNormal,
+  );
+
+  /*
+   * Never hand a screen an empty picker.
+   *
+   * If no doctor is marked for this work the clinic simply has not filled the
+   * checkboxes in yet — that is a blank setting, not an instruction to make the
+   * screen unusable. Falling back to the full list keeps «الدفتر اليومي» and
+   * «الزراعة» working exactly as they did before anyone touched «الأطباء»,
+   * which is also what makes this safe to ship to a clinic mid-use.
+   */
+  return matching.length > 0 ? matching : active;
 }
 
 /**
@@ -203,10 +226,6 @@ export function patientsList(opts: PatientsListOptions = {}, limit = 50) {
     .all();
 }
 
-export function searchPatients(q: string, limit = 30) {
-  return patientsList({ q }, limit);
-}
-
 export function patientById(id: number) {
   return db.select().from(patients).where(eq(patients.id, id)).get();
 }
@@ -267,13 +286,6 @@ function caseBase() {
 
 export function casesForPatient(patientId: number): CaseRow[] {
   return caseBase().where(eq(cases.patientId, patientId)).orderBy(desc(cases.openedDate)).all();
-}
-
-export function openCasesForPatient(patientId: number): CaseRow[] {
-  return caseBase()
-    .where(and(eq(cases.patientId, patientId), eq(cases.status, "open")))
-    .orderBy(desc(cases.openedDate))
-    .all();
 }
 
 export function caseWithDetails(caseId: number) {

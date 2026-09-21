@@ -17,10 +17,29 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const standalone = path.join(root, ".next", "standalone");
 const out = path.join(root, "build", "app");
 
+/**
+ * Settings arrive as `--flag=value`, not as a `VAR=value` shell prefix.
+ *
+ * npm hands every script to cmd.exe on Windows whatever shell you typed it in,
+ * and `ZUHA_TARGET_PLATFORM=win32 npm run stage` is not an assignment there —
+ * it is a command name. `npm run dist:win` died on that line for anyone not
+ * inside Git Bash. Flags are read by node itself, so the same script now works
+ * from cmd, PowerShell and bash alike. The old environment variables are still
+ * honoured, one step below the flags, for anything that already exports them.
+ * [packaging]
+ */
+const flags = Object.fromEntries(
+  process.argv.slice(2).flatMap((arg) => {
+    const m = /^--([^=]+)=(.*)$/.exec(arg);
+    return m ? [[m[1], m[2]]] : [];
+  }),
+);
+
 // Target platform for the native module. Defaults to the host so the packaged
-// app can be test-run locally; set to win32 when building the clinic installer.
-const targetPlatform = process.env.ZUHA_TARGET_PLATFORM || process.platform;
-const targetArch = process.env.ZUHA_TARGET_ARCH || "x64";
+// app can be test-run locally; pass --platform=win32 for the clinic installer.
+const targetPlatform =
+  flags.platform || process.env.ZUHA_TARGET_PLATFORM || process.platform;
+const targetArch = flags.arch || process.env.ZUHA_TARGET_ARCH || "x64";
 
 function must(p, what) {
   if (!fs.existsSync(p)) {
@@ -61,14 +80,14 @@ copy(path.join(root, "drizzle"), path.join(out, "drizzle"));
 // 3b. The DEMO bundle only: a pre-filled database to install on first launch.
 //
 //     The clean build passes nothing here and ships no database — it creates an
-//     empty one on the clinic laptop. The demo build passes ZUHA_SEED_DB so the
+//     empty one on the clinic laptop. The demo build passes --seed-db so the
 //     client can unzip, open, and immediately see a clinic with three months of
 //     history in it. The Electron wrapper copies this into the user's data
 //     folder once, and only when no database exists there yet. [packaging]
-const seedDb = process.env.ZUHA_SEED_DB;
+const seedDb = flags["seed-db"] || process.env.ZUHA_SEED_DB;
 if (seedDb) {
   if (!fs.existsSync(seedDb)) {
-    console.error(`✗ ZUHA_SEED_DB is set but missing: ${seedDb}`);
+    console.error(`✗ seed database was requested but is missing: ${seedDb}`);
     console.error("  Run `npm run db:demo:build` first.");
     process.exit(1);
   }
@@ -108,15 +127,20 @@ for (const dead of ["@img", "sharp"]) {
     fs.readFileSync(path.join(root, "node_modules", "electron", "package.json"), "utf8"),
   ).version;
   const moduleDir = path.join(out, "node_modules", "better-sqlite3");
-  const prebuildInstall = path.join(root, "node_modules", ".bin", "prebuild-install");
+  // The node_modules/.bin entry is an extensionless shell script. Windows
+  // cannot exec it, so execFileSync fails with ENOENT and the whole stage
+  // aborts. Run the package JS entry under the current Node binary instead —
+  // identical behaviour on every platform. [packaging]
+  const prebuildInstall = path.join(root, "node_modules", "prebuild-install", "bin.js");
 
   console.log(
     `→ fetching better-sqlite3 for electron ${electronVersion} ${targetPlatform}-${targetArch}`,
   );
   try {
     execFileSync(
-      prebuildInstall,
+      process.execPath,
       [
+        prebuildInstall,
         "--runtime=electron",
         `--target=${electronVersion}`,
         `--platform=${targetPlatform}`,

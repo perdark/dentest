@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useCallback, useRef, useState, useTransition } from "react";
+import { useActionState, useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 import {
@@ -11,7 +11,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,41 +19,24 @@ import { SubmitButton } from "@/components/forms/submit-button";
 import { useActionToast } from "@/components/forms/use-action-toast";
 import { FormError } from "@/components/forms/form-error";
 import { MoneySummary } from "@/components/forms/money-summary";
-import { PAYMENT_KIND_LABELS } from "@/lib/strings";
 import { parseAmount } from "@/lib/format";
-import {
-  createVisitNewCase,
-  addVisitPayment,
-  searchCollectableCases,
-  type CaseOption,
-  type VisitFormState,
-} from "@/lib/actions/visits";
+import { createVisitNewCase, type VisitFormState } from "@/lib/actions/visits";
 
 type DoctorOpt = { id: number; name: string };
 type TreatmentOpt = { id: number; nameAr: string };
-type CaseBrief = CaseOption;
-
-const PAYMENT_KINDS = ["session", "down_payment", "adjustment", "refund"] as const;
-type PaymentKind = (typeof PAYMENT_KINDS)[number];
 
 export function EntryDialog({
   doctors,
   treatments,
   date,
-  openCases,
-  totalCollectable,
 }: {
   doctors: DoctorOpt[];
   treatments: TreatmentOpt[];
   date: string;
-  openCases: CaseBrief[];
-  totalCollectable: number;
 }) {
   const [open, setOpen] = useState(false);
   const router = useRouter();
-  // بدون هذا يقع تركيز الفتح على شريط التبويبين — أول عنصر قابل للتبويب داخل
-  // النافذة — فيبدأ إدخال كل تسجيل بضغطة Tab زائدة، وأسهم لوحة المفاتيح تبدّل
-  // التبويب بدل أن تكتب. الاسم هو أول ما يُكتب، فهو أول ما يُركَّز عليه.
+  // الاسم هو أول ما يُكتب في كل تسجيل، فهو أول ما يُركَّز عليه عند الفتح.
   const nameRef = useRef<HTMLInputElement>(null);
 
   const handleSuccess = useCallback(() => {
@@ -71,40 +53,21 @@ export function EntryDialog({
       <DialogContent className="sm:max-w-md" initialFocus={nameRef}>
         <DialogHeader>
           <DialogTitle>تسجيل جديد</DialogTitle>
-          {/* التبويبان يتشابهان في العين ويختلفان تماماً في الأثر: أحدهما يفتح
-              حساباً جديداً والآخر يُنقص رصيداً قائماً. الفرق مكتوب، لا مُستنتَج. */}
+          {/* هذه النافذة تفتح حساباً جديداً فقط. تسديد حالة مفتوحة يجري من
+              «الديون ← إضافة دفعة» حيث تُختار الحالة برصيدها. */}
           <DialogDescription>
-            اختر «علاج جديد» إذا كانت هذه أول مرة يُفتح فيها حساب هذا العلاج،
-            و«دفعة على علاج سابق» إذا كان المريض يسدّد على حالة مفتوحة.
+            هذه النافذة تفتح حساب علاج جديد. إذا كان المريض يسدّد على حالة
+            مفتوحة، سجّل الدفعة من شاشة «الديون».
           </DialogDescription>
         </DialogHeader>
-        <Tabs defaultValue="new">
-          <TabsList className="h-11 w-full">
-            <TabsTrigger value="new">علاج جديد</TabsTrigger>
-            <TabsTrigger value="payment">دفعة على علاج سابق</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="new">
-            <NewCaseForm
-              key={open ? "new-open" : "new-closed"}
-              doctors={doctors}
-              treatments={treatments}
-              date={date}
-              nameRef={nameRef}
-              onSuccess={handleSuccess}
-            />
-          </TabsContent>
-
-          <TabsContent value="payment">
-            <PaymentForm
-              key={open ? "pay-open" : "pay-closed"}
-              openCases={openCases}
-              totalCollectable={totalCollectable}
-              date={date}
-              onSuccess={handleSuccess}
-            />
-          </TabsContent>
-        </Tabs>
+        <NewCaseForm
+          key={open ? "new-open" : "new-closed"}
+          doctors={doctors}
+          treatments={treatments}
+          date={date}
+          nameRef={nameRef}
+          onSuccess={handleSuccess}
+        />
       </DialogContent>
     </Dialog>
   );
@@ -264,168 +227,6 @@ function NewCaseForm({
       <FormError>{state.error}</FormError>
 
       <SubmitButton className="h-11 w-full text-base">حفظ التسجيل</SubmitButton>
-    </form>
-  );
-}
-
-// ── Mode B: payment on an existing open case ─────────────────────────────────
-function PaymentForm({
-  openCases,
-  totalCollectable,
-  date,
-  onSuccess,
-}: {
-  openCases: CaseBrief[];
-  totalCollectable: number;
-  date: string;
-  onSuccess: () => void;
-}) {
-  const [state, formAction] = useActionState<VisitFormState, FormData>(
-    addVisitPayment,
-    {},
-  );
-
-  // البحث يجري على الخادم — العيادة فيها مئات البطاقات المفتوحة. [D3]
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<CaseBrief[]>(openCases);
-  const [searching, startSearch] = useTransition();
-  const latest = useRef(0);
-  const [chosenId, setChosenId] = useState("");
-  const [amount, setAmount] = useState("");
-  const [kind, setKind] = useState<PaymentKind>("session");
-
-  useActionToast(state, "تمت إضافة الدفعة بنجاح", onSuccess);
-
-  function runSearch(next: string) {
-    setQuery(next);
-    const ticket = ++latest.current;
-    startSearch(async () => {
-      const found = await searchCollectableCases(next);
-      // تجاهُل نتيجة متأخّرة لطلب قديم حتى لا تستبدل الأحدث.
-      if (ticket === latest.current) setResults(found);
-    });
-  }
-
-  if (openCases.length === 0 && query.trim() === "") {
-    return (
-      <p className="text-muted-foreground py-6 text-center text-sm">
-        لا توجد حالات عليها رصيد لإضافة دفعة إليها. افتح حالة من تبويب «علاج
-        جديد».
-      </p>
-    );
-  }
-
-  const truncated = query.trim() === "" && totalCollectable > openCases.length;
-
-  // اختيار الحالة يتبع نتائج البحث: ما لم تعد الحالة المختارة ضمن النتائج،
-  // يعود الاختيار إلى أولها — وهو نفسه ما يقرأه السطر الحيّ أسفل المبلغ.
-  const selectedId = results.some((c) => String(c.id) === chosenId)
-    ? chosenId
-    : results[0]
-      ? String(results[0].id)
-      : "";
-  const selected = results.find((c) => String(c.id) === selectedId);
-  // الاسترجاع يزيد الرصيد المطلوب بدل أن يُنقصه — نفس ما تفعله طبقة الدفعات.
-  const afterPayment = selected
-    ? selected.remaining + (kind === "refund" ? 1 : -1) * parseAmount(amount)
-    : 0;
-
-  return (
-    <form action={formAction} className="space-y-3 pt-3">
-      <div className="space-y-2">
-        <Label htmlFor="pv-search">ابحث عن الحالة</Label>
-        {/* البحث يعيش داخل النموذج، فـ Enter فيه كان يُرسل الدفعة نفسها — قبل
-            اختيار الحالة وقبل كتابة المبلغ. البحث يبحث؛ الحفظ زرّه أدناه. */}
-        <Input
-          id="pv-search"
-          type="search"
-          inputMode="search"
-          autoComplete="off"
-          className="h-11"
-          placeholder="اسم المريض أو رقم الهاتف"
-          value={query}
-          onChange={(e) => runSearch(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") e.preventDefault();
-          }}
-        />
-        {truncated ? (
-          <p className="text-muted-foreground text-sm">
-            تُعرض أحدث {openCases.length} حالة من أصل {totalCollectable} — ابحث
-            بالاسم للوصول إلى البقية.
-          </p>
-        ) : null}
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="pv-case">الحالة</Label>
-        {results.length === 0 ? (
-          <p className="text-muted-foreground rounded-lg border border-dashed px-3 py-3 text-sm">
-            {searching ? "جارٍ البحث…" : "لا توجد حالة مطابقة."}
-          </p>
-        ) : (
-          <NativeSelect
-            id="pv-case"
-            name="caseId"
-            value={selectedId}
-            onChange={(e) => setChosenId(e.target.value)}
-          >
-            {results.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.label}
-              </option>
-            ))}
-          </NativeSelect>
-        )}
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="pv-amount">المبلغ</Label>
-        <Input
-          id="pv-amount"
-          name="amount"
-          inputMode="numeric"
-          className="h-11 text-base tabular-nums"
-          placeholder="0"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-        />
-        {selected ? (
-          <MoneySummary
-            figures={[
-              { label: "رصيد الحالة", amount: selected.remaining },
-              { label: "بعد الدفعة", amount: afterPayment, emphasis: true },
-            ]}
-          />
-        ) : null}
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="pv-kind">النوع</Label>
-        <NativeSelect
-          id="pv-kind"
-          name="kind"
-          value={kind}
-          onChange={(e) => setKind(e.target.value as PaymentKind)}
-        >
-          {PAYMENT_KINDS.map((k) => (
-            <option key={k} value={k}>
-              {PAYMENT_KIND_LABELS[k]}
-            </option>
-          ))}
-        </NativeSelect>
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="pv-date">التاريخ</Label>
-        <Input id="pv-date" name="date" type="date" className="h-11" defaultValue={date} />
-      </div>
-
-      <FormError>{state.error}</FormError>
-
-      <SubmitButton className="h-11 w-full text-base" disabled={results.length === 0}>
-        حفظ الدفعة
-      </SubmitButton>
     </form>
   );
 }
