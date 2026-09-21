@@ -27,8 +27,10 @@ const eslintConfig = defineConfig([
   ]),
   {
     // The Electron main process is a CommonJS Node script, not app code —
-    // require() is the correct module system there.
-    files: ["electron/**/*.js", "scripts/**/*.mjs"],
+    // require() is the correct module system there. The same applies to the
+    // electron-builder configs: electron-builder loads a `.cjs` config with
+    // require(), so that is the only module system available to them.
+    files: ["electron/**/*.js", "scripts/**/*.mjs", "*.cjs"],
     rules: { "@typescript-eslint/no-require-imports": "off" },
   },
 ]);
