@@ -68,3 +68,17 @@ verify.db-wal
 # — أي ملف حقيقي يضيع بين ضجيج البناء، و`git add -A` يبلع حزمة ويندوز كاملة.
 /dist/
 /build/
+
+# ── مادة العيادة الأصلية — clinic source material ──
+# 🔴 These are the raw client recordings the brief was decoded FROM: walkthrough
+#    videos of the clinic, stills of its paper ledgers (real patient names and
+#    amounts), and the owner's audio note. They were tracked until 2026-09-21
+#    and were removed from the whole history before the first push, because the
+#    GitHub repo is public. BRIEF.md describes what they contain — that is the
+#    only form this material belongs in here. Keep the originals off git.
+/frames/
+/transcripts/
+/transcripts_v2/
+*.MOV
+*.m4a
+photo_*.jpg
