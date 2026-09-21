@@ -58,6 +58,36 @@ copy(path.join(root, "public"), path.join(out, "public"));
 // 3. Migrations — the app migrates itself on first launch.
 copy(path.join(root, "drizzle"), path.join(out, "drizzle"));
 
+// 3b. The DEMO bundle only: a pre-filled database to install on first launch.
+//
+//     The clean build passes nothing here and ships no database — it creates an
+//     empty one on the clinic laptop. The demo build passes ZUHA_SEED_DB so the
+//     client can unzip, open, and immediately see a clinic with three months of
+//     history in it. The Electron wrapper copies this into the user's data
+//     folder once, and only when no database exists there yet. [packaging]
+const seedDb = process.env.ZUHA_SEED_DB;
+if (seedDb) {
+  if (!fs.existsSync(seedDb)) {
+    console.error(`✗ ZUHA_SEED_DB is set but missing: ${seedDb}`);
+    console.error("  Run `npm run db:demo:build` first.");
+    process.exit(1);
+  }
+  // A sidecar means the file is not self-contained; make-demo-db.mjs
+  // checkpoints and leaves WAL mode precisely so this cannot happen.
+  for (const sidecar of ["-wal", "-shm"]) {
+    if (fs.existsSync(seedDb + sidecar)) {
+      console.error(`✗ seed database still has a ${sidecar} sidecar.`);
+      console.error("  It would ship an incomplete database. Rebuild it.");
+      process.exit(1);
+    }
+  }
+  fs.mkdirSync(path.join(out, "seed"), { recursive: true });
+  fs.copyFileSync(seedDb, path.join(out, "seed", "zuha.db"));
+  console.log(
+    `→ bundled demo database (${(fs.statSync(seedDb).size / 1024 / 1024).toFixed(1)} MB)`,
+  );
+}
+
 // 4. Drop image-optimisation binaries: this app renders no <Image>, and
 //    sharp + @img is ~33 MB of platform-specific native code.
 for (const dead of ["@img", "sharp"]) {
@@ -207,7 +237,11 @@ const forbidden = [];
         forbidden.push(path.relative(out, p));
       } else scan(p, depth + 1);
     } else if (/\.(db|db-wal|db-shm|MOV|m4a|jpg|jpeg)$/i.test(e.name)) {
-      forbidden.push(path.relative(out, p));
+      // The demo bundle's seed database is the ONE database allowed through,
+      // and only at this exact path. Everything else matching is clinic data or
+      // source media that must never reach a client. [packaging]
+      const rel = path.relative(out, p);
+      if (!(seedDb && rel === path.join("seed", "zuha.db"))) forbidden.push(rel);
     }
   }
 })(out);
@@ -228,4 +262,8 @@ function sizeOf(p) {
 }
 
 console.log(`✅ staged build/app — ${(sizeOf(out) / 1024 / 1024).toFixed(1)} MB`);
-console.log("   no database, no recordings, no docs.");
+console.log(
+  seedDb
+    ? "   demo database bundled; no recordings, no docs."
+    : "   no database, no recordings, no docs.",
+);

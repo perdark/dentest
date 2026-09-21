@@ -1,6 +1,6 @@
 {
   "name": "zuha",
-  "version": "0.1.0",
+  "version": "2.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -26,11 +26,13 @@
     "db:seed": "tsx lib/db/seed.ts",
     "db:setup": "drizzle-kit migrate && tsx lib/db/seed.ts",
     "db:demo": "NODE_OPTIONS=--conditions=react-server tsx scripts/demo.ts",
+    "db:demo:build": "node scripts/make-demo-db.mjs",
     "db:demo:clear": "NODE_OPTIONS=--conditions=react-server tsx scripts/demo.ts --clear",
     "stage": "node scripts/stage-app.mjs",
     "app:build": "npm run build && npm run stage",
     "app:start": "electron .",
     "dist:win": "npm run build && ZUHA_TARGET_PLATFORM=win32 ZUHA_TARGET_ARCH=x64 npm run stage && electron-builder --win --x64",
+    "dist:win:demo": "npm run build && npm run db:demo:build && ZUHA_TARGET_PLATFORM=win32 ZUHA_TARGET_ARCH=x64 ZUHA_SEED_DB=./build/demo/zuha.db npm run stage && electron-builder --win --x64 --config electron-builder.demo.cjs",
     "dist:linux": "npm run app:build && electron-builder --linux dir",
     "test:lab": "NODE_OPTIONS=--conditions=react-server tsx --test tests/lab-dues.test.ts",
     "test:dates": "NODE_OPTIONS=--conditions=react-server tsx --test tests/date-display.test.ts",
@@ -87,6 +89,7 @@
     "files": [
       "electron/**/*",
       "!electron/اقرأني.txt",
+      "!electron/اقرأني-تجريبي.txt",
       "!**/*.map",
       "!node_modules/**/*",
       {

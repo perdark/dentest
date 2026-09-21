@@ -134,6 +134,41 @@ function adoptLegacyUserData(dataDir) {
   }
 }
 
+/**
+ * DEMO BUILD ONLY — install the bundled sample clinic on first launch.
+ *
+ * The demo copy exists so the client can unzip it and immediately walk through
+ * a clinic that already has three months of patients, money and settlements in
+ * it, instead of being handed empty screens. The clean build bundles no
+ * database at all, so `seed/zuha.db` simply does not exist there and this is a
+ * no-op — which is exactly what makes one wrapper safe for both bundles.
+ *
+ * Copied ONCE, and only when the data folder has no database yet: after that
+ * the demo copy is an ordinary install and whatever the client typed into it is
+ * theirs to keep. The two bundles also carry different productName values, so
+ * their data folders never collide and demo money can never reach real records.
+ *
+ * Returns true when this is the demo bundle.
+ */
+function installSeedDatabase(dataDir) {
+  const seed = path.join(appRoot, "seed", "zuha.db");
+  if (!fs.existsSync(seed)) return false;
+
+  const target = path.join(dataDir, "zuha.db");
+  if (fs.existsSync(target)) return true;
+
+  try {
+    fs.copyFileSync(seed, target);
+  } catch (err) {
+    fatal(
+      "تعذّر تحميل البيانات التجريبية",
+      `لم نتمكن من نسخ النسخة التجريبية إلى:\n${dataDir}\n\n` +
+        `التفاصيل: ${String((err && err.message) || err)}`,
+    );
+  }
+  return true;
+}
+
 // ── server lifecycle ────────────────────────────────────────────────────────
 
 async function startServer() {
@@ -152,7 +187,13 @@ async function startServer() {
   // the program: Program Files is read-only and is replaced on every update.
   const dataDir = app.getPath("userData");
   fs.mkdirSync(dataDir, { recursive: true });
-  adoptLegacyUserData(dataDir);
+
+  // On the demo bundle, stop here: pulling a clinic's REAL «دِنتِست» records
+  // into a demo copy would both mislead whoever is being shown the system and
+  // put live patient data somewhere nobody expects it to be.
+  if (!installSeedDatabase(dataDir)) {
+    adoptLegacyUserData(dataDir);
+  }
 
   // Dependencies ship as "vendor" rather than "node_modules", because
   // electron-builder strips any folder with that name from the package. Point
