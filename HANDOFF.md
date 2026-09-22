@@ -206,7 +206,7 @@ commit, and all six are fixed in the working tree.
 | `npm run typecheck` / `npx eslint .` | silent | silent |
 | `npm test` | 50 | **53** (+1 future-dated payment, +2 `isRecordableDate`) |
 | `npm run verify` | 37 | **36** (−1: it checked a screen that no longer exists) |
-| `npx playwright test` | 31 | **32** (+1: «الديون» offers two kinds, bounded date) |
+| `npx playwright test` | 31 | **33** (+1: «الديون» offers two kinds, bounded date; +1: a patient cannot be saved without a doctor) |
 | Manual pass §4.1–§4.12 | never run | 12/12, on `npm start` **and** `Zuha.exe` |
 | 15 screens × desktop + mobile, demo volume | never run | no console error, no 4xx, no overflow |
 
@@ -286,3 +286,9 @@ Separate from the six fixes, and the only schema change of the session:
   lab dues — reads `cases.doctor_id` only, and nothing in this change touches D1–D9.
 - Surfaces: the patients list column, the patient page («الطبيب المسؤول»), and the patient form.
   `lib/queries.ts` lost a correlated-subquery filter in favour of the indexed column.
+
+> **Count correction [2026-09-22]** — the table above first said e2e went 31 → 32; that
+> counted only the audit's own new test and missed `a patient cannot be saved without a doctor`,
+> which came with the field in this same commit. `npx playwright test --list` reports **33 tests
+> in 7 files**, and `npm test` **53 pass / 0 fail**. The commit message of `f07d065` carries the
+> old 32; this line is the correction.
