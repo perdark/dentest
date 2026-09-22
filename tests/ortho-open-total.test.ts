@@ -33,7 +33,6 @@ let updateCaseMeta: typeof import("@/lib/mutations")["updateCaseMeta"];
 let recordCasePayment: typeof import("@/lib/mutations")["recordCasePayment"];
 let caseWithDetails: typeof import("@/lib/queries")["caseWithDetails"];
 let debtsList: typeof import("@/lib/queries")["debtsList"];
-let openCasesBrief: typeof import("@/lib/queries")["openCasesBrief"];
 let dashboardStats: typeof import("@/lib/queries")["dashboardStats"];
 
 let doctorId: number;
@@ -55,7 +54,6 @@ before(async () => {
   recordCasePayment = mutations.recordCasePayment;
   caseWithDetails = queries.caseWithDetails;
   debtsList = queries.debtsList;
-  openCasesBrief = queries.openCasesBrief;
   dashboardStats = queries.dashboardStats;
 
   migrate(dbClient.db, { migrationsFolder: path.resolve("drizzle") });
@@ -142,12 +140,6 @@ test("an open-ended ortho case is never a patient debt", () => {
   // المدفوع أكبر من الإجمالي (صفر)، فالرصيد سالب ولا يُجمع في «المتبقي على المرضى».
   const stats = dashboardStats();
   assert.equal(stats.outstanding, 0);
-
-  const pickerIds = openCasesBrief().map((c) => c.id);
-  assert.ok(
-    !pickerIds.includes(openEndedCaseId),
-    "جلسات التقويم تُضاف من شاشة التقويم وحدها",
-  );
 });
 
 test("a legacy ortho case that still carries a stored total is excluded too", () => {
@@ -165,7 +157,6 @@ test("a legacy ortho case that still carries a stored total is excluded too", ()
   // 800,000 من فرق الأرقام محفوظة في قاعدة البيانات، ولا شيء منها يُطالَب به.
   assert.equal(caseWithDetails(legacyOrthoCaseId)!.remaining, 800_000);
   assert.ok(!debtsList().map((r) => r.id).includes(legacyOrthoCaseId));
-  assert.ok(!openCasesBrief().map((c) => c.id).includes(legacyOrthoCaseId));
   assert.equal(dashboardStats().outstanding, 0);
 });
 

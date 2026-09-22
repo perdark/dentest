@@ -188,3 +188,101 @@ where it is self-evident. A dash beside an amount reads as a minus sign.
 4. Nothing is committed. Suggested split: (a) `allowedDevOrigins` + `nativeButton` fixes,
    (b) clinic-facing copy/colour, (c) toasts + delete confirmation, (d) date picker, (e) tour +
    motion, (f) docs.
+
+---
+
+# Addendum — 2026-09-22 (session 4): audit of `1923cc0`, then six fixes
+
+Session 3 (`1923cc0`) was tested A-to-Z rather than extended. Every automated layer reproduced
+green, and the manual pass session 3 never ran — all twelve checks in its own handoff — was
+driven through the real UI against both `npm start` and the packaged `Zuha.exe`. Nothing in the
+four changes of `1923cc0` was wrong. Six defects were found around them, all older than that
+commit, and all six are fixed in the working tree.
+
+## What the audit confirmed
+
+| Layer | Before | After |
+|---|---|---|
+| `npm run typecheck` / `npx eslint .` | silent | silent |
+| `npm test` | 50 | **53** (+1 future-dated payment, +2 `isRecordableDate`) |
+| `npm run verify` | 37 | **36** (−1: it checked a screen that no longer exists) |
+| `npx playwright test` | 31 | **32** (+1: «الديون» offers two kinds, bounded date) |
+| Manual pass §4.1–§4.12 | never run | 12/12, on `npm start` **and** `Zuha.exe` |
+| 15 screens × desktop + mobile, demo volume | never run | no console error, no 4xx, no overflow |
+
+## The six fixes
+
+1. **«تسوية» recorded cash that never arrived.** `/help` told the clinic «تسوية» لتصحيح حساب,
+   and nothing in the codebase branched on `kind === "adjustment"` — it was stored positive and
+   counted by every money reader. Correcting a 600,000 over-billing with one instead *credited*
+   600,000: cash on hand, the doctor's collected total and half of it as payout, on money that
+   never reached the drawer. «النوع» on «الديون» is now **جلسة / استرجاع** only; «مقدمة» went
+   with it because its only cap guards open-ended ortho, which that screen never lists.
+   Correcting a line is «إلغاء دفعة» (`deletePayment`), which `/help` now says.
+   Both labels stay in `PAYMENT_KIND_LABELS` so historic rows still read correctly, and the
+   `kind` column still accepts all four. **Not a migration — no row changed.**
+2. **A payment could be dated any year.** `isValidISODate` only asks whether a day exists, so
+   «2099-12-31» saved: the money left «تحصيل الشهر» and the settlement while still counting in
+   «النقد المتوفر» and against the patient. New `isRecordableDate()` (`lib/dates.ts`) bounds it
+   to `[EARLIEST_RECORD_DATE, today]`, enforced in `recordCasePayment`, `recordXrayFilm` and
+   `createCase`, and on every record-date input as `min`/`max`. **Appointments are exempt** —
+   see golden rule 6 in `CLAUDE.md`.
+3. **`openCasesBrief()` was production-dead and `verify` guarded a deleted screen.** It fed the
+   «دفعة على علاج سابق» picker `1923cc0` removed; afterwards its only callers were
+   `scripts/verify.ts` and `tests/ortho-open-total.test.ts`, so `npm run verify` printed
+   `✓ ortho: a case is not in the daily payment picker` about a picker that was gone. Query,
+   `collectableCaseCount()`, and both assertions deleted.
+4. **«مقدمة» on «الديون» was inert** — confirmed by probe, removed with fix 1.
+5. **Nine exports with no reference anywhere** deleted: `getTreatmentType`, `TREATMENT_LABELS`,
+   `BUCKET_LABELS`, `medicalFlagsMarker`, `formatIQDShort`, `isPinSet`, `PERMANENT_TEETH`,
+   `PRIMARY_TEETH`, `posteriorTeeth`. Each site keeps a one-line note saying what left and why.
+6. **Two wrong lines in `CLAUDE.md`**: `db:setup` seeds **4** doctors, not 5; and
+   `npm run build && npm start` is a browser convenience, not what the clinic runs — Next warns
+   `"next start" does not work with "output: standalone"` for exactly that reason. The clinic
+   runs `electron/main.js` → `.next/standalone/server.js`.
+
+## Two scares that were not bugs — do not re-chase
+
+- **The packaged app does not lose data.** An intermediate run left the exe's database holding
+  an expense but zero cases. That was the harness: Playwright's `--grep-invert` is
+  case-insensitive, so `"LEDGER"` also excluded the case-creating test whose title ends "…in the
+  day's ledger". Rerun clean against a fresh install: 11 passed, every row persisted.
+- **The `revalidatePath` gaps are harmless.** `recordDebtPayment` revalidates only `/debts`,
+  `/daily` and `/dashboard`, which looks like staleness for `/settlement`. Every app route builds
+  as `ƒ` dynamic; nothing is cached.
+
+## Still open
+
+- **A refund is unreachable on a fully settled case.** «الديون» lists only cases carrying a
+  balance and is now the only entry point. Not a regression — the removed daily picker had the
+  same constraint — but the clinic has still never been asked. Worth a question.
+- `EARLIEST_RECORD_DATE` is `2020-01-01`, chosen to catch a mistyped year rather than to date the
+  clinic. If the clinic ever back-enters older paper records, lower it.
+
+## Testing the packaged app without touching clinic data
+
+`electron/main.js` hardcodes `ZUHA_DATA_DIR` to Electron's `userData`, so `ZUHA_DB` cannot
+redirect it. Pass Chromium's own switch instead:
+
+```
+dist\win-unpacked\Zuha.exe --user-data-dir=C:\some\scratch\dir
+```
+
+It then migrates and seeds a fresh database there and serves on a random localhost port (find it
+with `Get-NetTCPConnection -State Listen | Where-Object OwningProcess -in (Get-Process Zuha).Id`),
+which a browser or Playwright can drive like any other server.
+
+## Also in this working tree — «الطبيب المسؤول» on a patient (migration 0010)
+
+Separate from the six fixes, and the only schema change of the session:
+`patients.doctor_id` (migration `0010_glossy_hobgoblin`, plus `patients_doctor_idx`).
+
+- **Required in the UI, nullable in the column.** «المرضى» refuses to save without a doctor —
+  both the form and `createPatient` / `updatePatient` in `lib/actions/patients.ts`. The column
+  stays nullable because every patient registered before 2026-09-22 has no answer to give;
+  NULL therefore means exactly "registered before the field existed". `findOrCreatePatient`
+  (appointment booking) is the other writer that can still leave it NULL.
+- **It is the registration doctor, not the treating one.** Money — settlement, commission,
+  lab dues — reads `cases.doctor_id` only, and nothing in this change touches D1–D9.
+- Surfaces: the patients list column, the patient page («الطبيب المسؤول»), and the patient form.
+  `lib/queries.ts` lost a correlated-subquery filter in favour of the indexed column.

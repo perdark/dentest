@@ -22,6 +22,7 @@ import { FormError } from "@/components/forms/form-error";
 import { MoneySummary } from "@/components/forms/money-summary";
 import { createOrthoCase, type OrthoFormState } from "@/lib/actions/ortho";
 import { parseAmount } from "@/lib/format";
+import { EARLIEST_RECORD_DATE } from "@/lib/dates";
 
 type DoctorOption = { id: number; name: string };
 
@@ -177,6 +178,8 @@ export function NewOrthoCaseDialog({
                 name="openedDate"
                 type="date"
                 defaultValue={today}
+                min={EARLIEST_RECORD_DATE}
+                max={today}
                 className="h-11"
               />
             </div>

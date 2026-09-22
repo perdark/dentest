@@ -129,6 +129,34 @@ export function isValidISODate(s: string): boolean {
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === s;
 }
 
+/**
+ * The floor for anything the clinic records. Older than any paper notebook
+ * being typed in and far enough back that back-entering history is never
+ * blocked — it exists to catch a year typed as 1202 or 0226, not to date the
+ * clinic.
+ */
+export const EARLIEST_RECORD_DATE = "2020-01-01";
+
+/**
+ * 🔴 A date a RECORD may carry: real, not in the future, not absurdly old.
+ *
+ * `isValidISODate` only asks whether the day exists on a calendar, so
+ * «2099-12-31» passed every check in the app. A payment dated years ahead is
+ * accepted, then silently leaves «تحصيل الشهر» and the monthly settlement
+ * while still counting in «النقد المتوفر» and in the patient's balance — the
+ * two figures the owner reconciles against each other stop agreeing and
+ * nothing says why. One mistyped year digit in a native date field does it.
+ *
+ * Money and records only. An APPOINTMENT is booked in the future by
+ * definition, so `lib/actions/appointments.ts` and the `nextAppointment`
+ * fields in `lib/actions/ortho.ts` keep using `isValidISODate`.
+ *
+ * ISO dates compare correctly as strings — no Date objects, no timezone.
+ */
+export function isRecordableDate(s: string, today: string = todayISO()): boolean {
+  return isValidISODate(s) && s >= EARLIEST_RECORD_DATE && s <= today;
+}
+
 /** Validate a 24-hour appointment time from a native time input. */
 export function isValidTime(s: string): boolean {
   if (!/^\d{2}:\d{2}$/.test(s)) return false;

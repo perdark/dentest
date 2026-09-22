@@ -12,6 +12,7 @@ import { useActionToast } from "@/components/forms/use-action-toast";
 import { FormError } from "@/components/forms/form-error";
 import { XRAY_PLACEMENT_LABELS } from "@/lib/strings";
 import { recordXrayAction, type XrayFormState } from "@/lib/actions/xrays";
+import { EARLIEST_RECORD_DATE } from "@/lib/dates";
 
 type XrayTypeOpt = { id: number; nameAr: string };
 
@@ -117,6 +118,8 @@ export function XrayForm({ types, today }: { types: XrayTypeOpt[]; today: string
                 name="date"
                 type="date"
                 defaultValue={today}
+                min={EARLIEST_RECORD_DATE}
+                max={today}
                 className="h-11"
               />
             </div>

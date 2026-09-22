@@ -11,7 +11,6 @@ import {
   listTreatmentTypes,
   caseWithDetails,
   debtsList,
-  openCasesBrief,
   dashboardStats,
 } from "@/lib/queries";
 import {
@@ -188,10 +187,10 @@ check(
   "ortho case is not in the debts call-list",
   !debtsList().some((r) => r.id === orthoCase.caseId),
 );
-check(
-  "ortho case is not in the daily payment picker",
-  !openCasesBrief().some((c) => c.id === orthoCase.caseId),
-);
+// A second check here asserted the same exclusion for `openCasesBrief()`, the
+// daily payment picker's query. 1923cc0 deleted that picker and 2026-09-22
+// deleted the query, so the check was reporting green on a screen that no
+// longer existed. «الديون» above is now the only list a balance appears in.
 // المتبقي المعروض في لوحة التحكم = زراعة عدي وحدها (2M − 700k = 1.3M).
 check(
   "dashboard outstanding counts the implant only, not ortho",

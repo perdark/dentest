@@ -6,6 +6,10 @@ import path from "node:path";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { eq, sql } from "drizzle-orm";
 
+// Static import, unlike the `@/lib/*` modules below: `lib/dates` opens no
+// database, so it does not have to wait for ZUHA_DB to be set.
+import { shiftISOByDays, todayISO } from "@/lib/dates";
+
 const testDir = mkdtempSync(path.join(tmpdir(), "zuha-payments-"));
 process.env.ZUHA_DB = path.join(testDir, "payments.db");
 
@@ -236,6 +240,46 @@ test("calendar-invalid dates are rejected", () => {
     recordCasePayment({ caseId, amount: 100, paidDate: "2026-02-31" }),
     { ok: false, reason: "invalid_date" },
   );
+});
+
+/**
+ * 🔴 A payment cannot have happened tomorrow.
+ *
+ * «2099-12-31» is a real day, so it cleared `isValidISODate` and was saved: the
+ * money then sat outside «تحصيل الشهر» and the monthly settlement while still
+ * counting in «النقد المتوفر» and against the patient's balance. One mistyped
+ * year digit in a native date field was enough. The guard lives in
+ * `recordCasePayment` rather than in the action, because the mutations layer
+ * owns what a payment is allowed to be. [golden rule 1][2026-09-22]
+ */
+test("a payment dated after today is refused, in either direction of typo", () => {
+  const caseId = createCase();
+  // Local dates, not UTC: the clinic is UTC+3, so a UTC "tomorrow" computed
+  // late in the Baghdad evening is still today here and the assertion would
+  // pass or fail depending on the hour the suite ran.
+  const today = todayISO();
+  const tomorrow = shiftISOByDays(today, 1);
+
+  for (const bad of [tomorrow, "2099-12-31", "2062-07-19", "1900-01-01"]) {
+    assert.deepEqual(
+      recordCasePayment({ caseId, amount: 100, paidDate: bad }),
+      { ok: false, reason: "future_date" },
+      bad,
+    );
+  }
+
+  // Nothing was written by any of them.
+  assert.equal(
+    dbClient.db
+      .select({ value: sql<number>`count(*)` })
+      .from(schema.payments)
+      .where(eq(schema.payments.caseId, caseId))
+      .get()?.value,
+    0,
+  );
+
+  // Today still works — the guard is a window, not a block.
+  assert.equal(recordCasePayment({ caseId, amount: 100, paidDate: today }).ok, true);
 });
 
 test("an audit failure rolls the payment back", () => {

@@ -21,6 +21,7 @@ import { FormError } from "@/components/forms/form-error";
 import { MoneySummary } from "@/components/forms/money-summary";
 import { parseAmount } from "@/lib/format";
 import { createVisitNewCase, type VisitFormState } from "@/lib/actions/visits";
+import { EARLIEST_RECORD_DATE } from "@/lib/dates";
 
 type DoctorOpt = { id: number; name: string };
 type TreatmentOpt = { id: number; nameAr: string };
@@ -29,10 +30,12 @@ export function EntryDialog({
   doctors,
   treatments,
   date,
+  today,
 }: {
   doctors: DoctorOpt[];
   treatments: TreatmentOpt[];
   date: string;
+  today: string;
 }) {
   const [open, setOpen] = useState(false);
   const router = useRouter();
@@ -65,6 +68,7 @@ export function EntryDialog({
           doctors={doctors}
           treatments={treatments}
           date={date}
+          today={today}
           nameRef={nameRef}
           onSuccess={handleSuccess}
         />
@@ -78,12 +82,14 @@ function NewCaseForm({
   doctors,
   treatments,
   date,
+  today,
   nameRef,
   onSuccess,
 }: {
   doctors: DoctorOpt[];
   treatments: TreatmentOpt[];
   date: string;
+  today: string;
   nameRef?: React.RefObject<HTMLInputElement | null>;
   onSuccess: () => void;
 }) {
@@ -210,7 +216,17 @@ function NewCaseForm({
         </div>
         <div className="space-y-2">
           <Label htmlFor="nc-date">التاريخ</Label>
-          <Input id="nc-date" name="date" type="date" className="h-11" defaultValue={date} />
+          {/* لا يُفتح حساب بتاريخ قادم: خطأ رقم واحد في السنة يُخرج الحالة
+              ودفعتها الأولى من حساب الشهر بلا أي تنبيه. */}
+          <Input
+            id="nc-date"
+            name="date"
+            type="date"
+            className="h-11"
+            defaultValue={date > today ? today : date}
+            min={EARLIEST_RECORD_DATE}
+            max={today}
+          />
         </div>
       </div>
 

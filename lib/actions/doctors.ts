@@ -11,7 +11,7 @@ import {
   deleteLabEntry,
   findOrCreatePatient,
 } from "@/lib/mutations";
-import { todayISO, isValidISODate } from "@/lib/dates";
+import { todayISO, isRecordableDate } from "@/lib/dates";
 import { parseAmount } from "@/lib/format";
 import { requireAuth } from "@/lib/auth";
 
@@ -200,7 +200,7 @@ export async function addLabEntryAction(
   addLabEntry({
     doctorId: d.doctorId,
     branch: d.branch,
-    entryDate: isValidISODate(d.entryDate) ? d.entryDate : todayISO(),
+    entryDate: isRecordableDate(d.entryDate) ? d.entryDate : todayISO(),
     amount,
     note: d.note || null,
     patientId,

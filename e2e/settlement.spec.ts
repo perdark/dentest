@@ -119,3 +119,40 @@ test("a refund recorded from «الديون» raises the balance instead of lowe
       .first(),
   ).toContainText("1,600,000");
 });
+
+/**
+ * «النوع» offers only the two kinds that behave differently, and the date
+ * cannot be pushed past today.
+ *
+ * Both are about what the menu ALLOWS rather than what the money does, which
+ * is why they belong here and not in `tests/`. «تسوية» was dropped on
+ * 2026-09-22 because no code branched on it — «الدليل» told the clinic to use
+ * it to correct an account and it was stored as ordinary money in, paying
+ * commission on cash that never arrived. If either option comes back onto this
+ * dialog, this fails.
+ */
+test("«الديون» offers only جلسة and استرجاع, and cannot be dated ahead", async ({
+  page,
+}) => {
+  await page.goto("/debts");
+  await page
+    .locator('[data-tour="debts-list"]')
+    .getByRole("row")
+    .filter({ hasText: PATIENT })
+    .first()
+    .getByRole("button", { name: "إضافة دفعة" })
+    .click();
+
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+
+  const kind = dialog.getByLabel("النوع");
+  await expect(kind.locator("option")).toHaveText(["جلسة", "استرجاع"]);
+  await expect(kind).toHaveValue("session");
+
+  // The native picker refuses a later day itself; `max` is what tells it to.
+  const date = dialog.getByLabel("التاريخ");
+  const today = await date.inputValue();
+  await expect(date).toHaveAttribute("max", today);
+  await expect(date).toHaveAttribute("min", "2020-01-01");
+});

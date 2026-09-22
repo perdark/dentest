@@ -9,7 +9,7 @@ import {
   treatmentTypeFailureMessage,
 } from "@/lib/mutations";
 import { parseAmount } from "@/lib/format";
-import { isValidISODate } from "@/lib/dates";
+import { isRecordableDate } from "@/lib/dates";
 import { requireAuth } from "@/lib/auth";
 
 export type VisitFormState = { ok?: boolean; error?: string };
@@ -44,7 +44,12 @@ export async function createVisitNewCase(
   const patientName = d.patientName.trim();
   if (!patientName) return { error: "اسم المريض مطلوب" };
   if (!Number.isInteger(d.doctorId) || d.doctorId <= 0) return { error: "اختر الطبيب" };
-  if (!isValidISODate(d.date)) return { error: "التاريخ غير صحيح" };
+  // Not just a real calendar day — a day a case can have been opened on. A
+  // mistyped year sends the whole case and its first payment out of the
+  // month's books. [2026-09-22]
+  if (!isRecordableDate(d.date)) {
+    return { error: "التاريخ غير صحيح — لا يمكن فتح حساب بتاريخ لاحق لليوم" };
+  }
 
   // Totals are computed server-side — never trusted from the client.
   const price = parseAmount(d.price);

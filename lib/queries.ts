@@ -1,5 +1,5 @@
 import "server-only";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   doctors,
@@ -107,10 +107,6 @@ export function listTreatmentTypes() {
     .all();
 }
 
-export function getTreatmentType(id: number) {
-  return db.select().from(treatmentTypes).where(eq(treatmentTypes.id, id)).get();
-}
-
 /**
  * الاقتراحات أسفل حقل «العلاج» في الدفتر اليومي — الأسماء المستعملة سابقاً.
  *
@@ -177,9 +173,15 @@ export function patientsList(opts: PatientsListOptions = {}, limit = 50) {
   }
 
   if (opts.doctorId && Number.isInteger(opts.doctorId) && opts.doctorId > 0) {
-    conditions.push(sql`exists (
-      select 1 from cases c
-      where c.patient_id = "patients"."id" and c.doctor_id = ${opts.doctorId}
+    // «مرضى هذا الطبيب» = المسجَّلون باسمه **أو** من عالجهم فعلاً. المريض
+    // الجديد لا حالة له بعد، فلو بقي الشرط على الحالات وحدها لاختفى من فلتر
+    // الطبيب الذي سُجِّل عنده للتوّ — حقلٌ يُملأ ولا يُغيّر شيئاً. [2026-09-22]
+    conditions.push(sql`(
+      ${patients.doctorId} = ${opts.doctorId}
+      or exists (
+        select 1 from cases c
+        where c.patient_id = "patients"."id" and c.doctor_id = ${opts.doctorId}
+      )
     )`);
   }
 
@@ -217,7 +219,16 @@ export function patientsList(opts: PatientsListOptions = {}, limit = 50) {
     )`);
   }
 
-  const base = db.select().from(patients);
+  // اسم الطبيب يُقرأ بجملة فرعية لا بـ join: الصف يبقى صف المريض كاملاً كما
+  // يتوقعه كل قارئ لهذه الدالة، ويُضاف إليه الاسم فقط.
+  const base = db
+    .select({
+      ...getTableColumns(patients),
+      doctorName: sql<string | null>`(
+        select d.name from doctors d where d.id = "patients"."doctor_id"
+      )`,
+    })
+    .from(patients);
   const filtered = conditions.length ? base.where(and(...conditions)) : base;
   // A search reads best alphabetically; an unfiltered list reads best newest-first.
   return filtered
@@ -342,60 +353,12 @@ export function dailyLedger(date: string) {
     .all();
 }
 
-/**
- * Cases that can still take money, for the daily "دفعة" picker.
- * Searchable + capped: Dr. Adi alone has 500–820 implant cards, so an
- * unbounded list here is unusable at real clinic scale. [D3]
- * Includes `completed` cases that still carry a balance — the clinic is still
- * chasing that money. [A4]
- * Ortho is out: its sessions are priced and added from /ortho/[id] only, the
- * same way implants and X-rays are managed from their own screens. [2026-08-19]
- */
-export function openCasesBrief(q = "", limit = 40) {
-  const term = `%${q.trim()}%`;
-  const collectable = sql`${cases.status} != 'cancelled' and (${cases.totalPrice} - (${paidExpr})) > 0 and ${notOrtho}`;
-
-  return db
-    .select({
-      id: cases.id,
-      patientName: patients.fullName,
-      patientMedicalFlags: patients.medicalFlags,
-      phone: patients.phone,
-      treatment: treatmentTypes.nameAr,
-      remaining: sql<number>`${cases.totalPrice} - (${paidExpr})`,
-    })
-    .from(cases)
-    .innerJoin(patients, eq(cases.patientId, patients.id))
-    .innerJoin(treatmentTypes, eq(cases.treatmentTypeId, treatmentTypes.id))
-    .where(
-      q.trim()
-        ? and(
-            collectable,
-            sql`(${patients.fullName} like ${term} or ${patients.phone} like ${term})`,
-          )
-        : collectable,
-    )
-    .orderBy(desc(cases.openedDate), desc(cases.id))
-    .limit(Math.min(200, Math.max(1, limit)))
-    .all();
-}
-
-/**
- * How many collectable cases exist, so the picker can say it is truncated.
- * Counts exactly what `openCasesBrief` would list — ortho excluded. [2026-08-19]
- */
-export function collectableCaseCount(): number {
-  return (
-    db
-      .select({ v: sql<number>`count(*)` })
-      .from(cases)
-      .innerJoin(treatmentTypes, eq(cases.treatmentTypeId, treatmentTypes.id))
-      .where(
-        sql`${cases.status} != 'cancelled' and (${cases.totalPrice} - (${paidExpr})) > 0 and ${notOrtho}`,
-      )
-      .get()?.v ?? 0
-  );
-}
+// `openCasesBrief` and `collectableCaseCount` lived here until 2026-09-22.
+// They fed the «دفعة على علاج سابق» picker in the daily entry dialog, which
+// 1923cc0 removed; after that no screen called either one, and the only thing
+// keeping them compiling was a check in `scripts/verify.ts` that printed a
+// green tick for a rule about a picker that no longer existed. A payment on an
+// open case is recorded from «الديون», whose list is `debtsList()` below.
 
 // ── Appointments (السجل الرئيسي) [B1] ────────────────────────────────────────
 /**

@@ -8,7 +8,7 @@ import {
   xrayFilmFailureMessage,
 } from "@/lib/mutations";
 import { parseAmount } from "@/lib/format";
-import { isValidISODate, todayISO } from "@/lib/dates";
+import { isRecordableDate, todayISO } from "@/lib/dates";
 import { requireAuth } from "@/lib/auth";
 
 export type XrayFormState = { ok?: boolean; error?: string };
@@ -45,7 +45,7 @@ export async function recordXrayAction(
     return { error: parsed.error.issues[0]?.message ?? "تحقق من البيانات المُدخلة" };
   }
   const d = parsed.data;
-  const filmDate = isValidISODate(d.date) ? d.date : todayISO();
+  const filmDate = isRecordableDate(d.date) ? d.date : todayISO();
 
   const price = parseAmount(d.price);
   if (price <= 0) return { error: "أدخل سعراً صحيحاً أكبر من صفر" };

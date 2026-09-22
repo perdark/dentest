@@ -12,7 +12,7 @@ import {
 } from "@/lib/mutations";
 import { listTreatmentTypes } from "@/lib/queries";
 import { parseAmount } from "@/lib/format";
-import { todayISO, isValidISODate } from "@/lib/dates";
+import { todayISO, isValidISODate, isRecordableDate } from "@/lib/dates";
 import { requireAuth } from "@/lib/auth";
 
 export type OrthoFormState = { error?: string; ok?: boolean };
@@ -77,7 +77,7 @@ export async function createOrthoCase(
   }
 
   const openedDate =
-    d.openedDate && isValidISODate(d.openedDate) ? d.openedDate : todayISO();
+    d.openedDate && isRecordableDate(d.openedDate) ? d.openedDate : todayISO();
   const nextAppointment =
     d.nextAppointment && isValidISODate(d.nextAppointment) ? d.nextAppointment : null;
 
@@ -131,7 +131,7 @@ export async function addOrthoPayment(
   if (amount <= 0) return { error: "أدخل مبلغاً صحيحاً أكبر من صفر" };
 
   const paidDate =
-    d.paidDate && isValidISODate(d.paidDate) ? d.paidDate : todayISO();
+    d.paidDate && isRecordableDate(d.paidDate) ? d.paidDate : todayISO();
 
   const result = recordCasePayment({
     caseId: d.caseId,
@@ -175,7 +175,7 @@ export async function addOrthoDownPayment(
   if (amount <= 0) return { error: "أدخل مبلغاً صحيحاً أكبر من صفر" };
 
   const paidDate =
-    d.paidDate && isValidISODate(d.paidDate) ? d.paidDate : todayISO();
+    d.paidDate && isRecordableDate(d.paidDate) ? d.paidDate : todayISO();
 
   const result = recordCasePayment({
     caseId: d.caseId,

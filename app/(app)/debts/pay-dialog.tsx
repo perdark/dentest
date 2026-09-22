@@ -19,8 +19,27 @@ import { MoneySummary } from "@/components/forms/money-summary";
 import { formatIQD, parseAmount } from "@/lib/format";
 import { PAYMENT_KIND_LABELS } from "@/lib/strings";
 import { recordDebtPayment, type PayState } from "@/lib/actions/debts";
+import { EARLIEST_RECORD_DATE } from "@/lib/dates";
 
-const PAYMENT_KINDS = ["session", "down_payment", "adjustment", "refund"] as const;
+/**
+ * The two kinds that behave differently, and nothing else.
+ *
+ * 🔴 «تسوية» and «مقدمة» were removed on 2026-09-22 because neither did
+ * anything: no code anywhere branches on them, so both were stored as ordinary
+ * money in. «تسوية» was the dangerous one — «الدليل» told the clinic to use it
+ * «لتصحيح حساب», and "correcting" a 600,000 over-billing with one instead
+ * CREDITED 600,000: cash on hand rose, the doctor's collected total rose, and
+ * the payout rose by half of it, on money that never reached the drawer.
+ * Correcting a line is `VoidPaymentButton` → `deletePayment`, which is the only
+ * clean correction path and says so in `lib/mutations.ts`.
+ *
+ * «مقدمة» was merely inert here: its cap guards open-ended ortho, which this
+ * screen never lists, so it behaved exactly like «جلسة». It is still written by
+ * the screens that mean it — a new case's first payment, an implant card, an
+ * ortho down payment — and `PAYMENT_KIND_LABELS` still carries both labels so
+ * every row ever recorded under them still reads correctly. [2026-09-22]
+ */
+const PAYMENT_KINDS = ["session", "refund"] as const;
 type PaymentKind = (typeof PAYMENT_KINDS)[number];
 
 export function PayDialog({
@@ -149,6 +168,8 @@ export function PayDialog({
               name="date"
               type="date"
               defaultValue={today}
+              min={EARLIEST_RECORD_DATE}
+              max={today}
               className="h-11"
             />
           </div>

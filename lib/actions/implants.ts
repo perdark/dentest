@@ -11,7 +11,7 @@ import {
   recordCasePayment,
 } from "@/lib/mutations";
 import { parseAmount } from "@/lib/format";
-import { todayISO, isValidISODate } from "@/lib/dates";
+import { todayISO, isRecordableDate } from "@/lib/dates";
 import { requireAuth } from "@/lib/auth";
 
 export type ImplantFormState = { ok?: boolean; error?: string };
@@ -54,7 +54,7 @@ export async function createImplantCard(
   }
 
   // كل المبالغ تُحسب على الخادم — لا نثق بأي إجمالي من المتصفّح.
-  const date = d.date && isValidISODate(d.date) ? d.date : todayISO();
+  const date = d.date && isRecordableDate(d.date) ? d.date : todayISO();
   const price = Math.max(0, parseAmount(d.price));
   const discount = Math.max(0, parseAmount(d.discount));
   const total = Math.max(0, price - discount);
@@ -161,7 +161,7 @@ export async function addImplantSession(
   if (amount <= 0) {
     return { error: "أدخل مبلغاً صحيحاً أكبر من صفر" };
   }
-  const date = d.date && isValidISODate(d.date) ? d.date : todayISO();
+  const date = d.date && isRecordableDate(d.date) ? d.date : todayISO();
 
   const result = recordCasePayment({
     caseId: d.caseId,

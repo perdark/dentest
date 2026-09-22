@@ -27,6 +27,13 @@ export default async function PatientsPage({
   const sp = await searchParams;
   const q = sp.q?.trim() ?? "";
   const doctors = listDoctors({ activeOnly: true });
+  /*
+   * «إضافة مريض» صار يشترط طبيباً، فقائمة فارغة تعني شاشة لا يمكن الحفظ منها.
+   * لو أُوقف كل الأطباء من «الأطباء» فذلك إعداد ناقص لا أمر بتعطيل التسجيل —
+   * نرجع إلى القائمة الكاملة، كما تفعل `listDoctors` نفسها حين يُصفّي شرط
+   * نوع العمل كل الأسماء.
+   */
+  const formDoctors = doctors.length > 0 ? doctors : listDoctors();
   const chosenDoctor = Number(sp.doctorId);
   const doctorId =
     Number.isInteger(chosenDoctor) && doctors.some((d) => d.id === chosenDoctor)
@@ -48,7 +55,7 @@ export default async function PatientsPage({
       <div className="flex items-center justify-between gap-3">
         <h1 className="flex items-center gap-2 text-2xl font-bold"><Users className="text-muted-foreground size-6 shrink-0" />المرضى</h1>
         <div data-tour="patients-add">
-          <PatientForm />
+          <PatientForm doctors={formDoctors} />
         </div>
       </div>
 
@@ -123,6 +130,8 @@ export default async function PatientsPage({
               <TableRow>
                 <TableHead>الاسم</TableHead>
                 <TableHead>رقم الهاتف</TableHead>
+                {/* الطبيب يُخفى على الهاتف: الشاشة الضيقة للاسم والرقم. */}
+                <TableHead className="hidden md:table-cell">الطبيب</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -153,6 +162,9 @@ export default async function PatientsPage({
                         <EmptyValue>بلا رقم هاتف</EmptyValue>
                       </span>
                     )}
+                  </TableCell>
+                  <TableCell className="hidden md:table-cell">
+                    {p.doctorName ?? <EmptyValue>بلا طبيب</EmptyValue>}
                   </TableCell>
                 </TableRow>
               ))}

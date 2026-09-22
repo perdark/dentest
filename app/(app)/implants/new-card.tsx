@@ -20,6 +20,7 @@ import { FormError } from "@/components/forms/form-error";
 import { MoneySummary } from "@/components/forms/money-summary";
 import { parseAmount } from "@/lib/format";
 import { createImplantCard, type ImplantFormState } from "@/lib/actions/implants";
+import { EARLIEST_RECORD_DATE } from "@/lib/dates";
 
 export function NewCard({
   doctors,
@@ -187,6 +188,8 @@ export function NewCard({
                 name="date"
                 type="date"
                 defaultValue={today}
+                min={EARLIEST_RECORD_DATE}
+                max={today}
                 className="h-11"
               />
             </div>

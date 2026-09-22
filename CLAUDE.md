@@ -20,11 +20,26 @@ Next.js 16 (App Router, RSC, server actions) · TypeScript · Tailwind v4 · sha
    caller). It is a different number from `cases.labCost`; confusing the two silently deducts money
    from doctors' shares. See `docs/OWNER-NOTES.md` §9 + `tests/lab-dues.test.ts`.
 5. **Layer 2 numbers are UNCONFIRMED** (commission %, lab/% formula, 5M rule, salaries) — they live in Settings, editable, never hardcoded in a screen. They no longer carry "غير مؤكد" badges: build-phase caveats are not clinic-facing copy. What is unconfirmed is recorded in `docs/OWNER-NOTES.md` instead.
-6. **Nothing in the UI tells the clinic it is looking at a test system.** No demo banner, no "غير مؤكد", no placeholder or TODO text. Demo data is loaded by `npm run db:demo` before handover, never from inside the app.
+6. **A record's date is checked with `isRecordableDate()`, never `isValidISODate()` alone.**
+   The latter only asks whether the day exists on a calendar, so «2099-12-31» passed everywhere
+   until 2026-09-22: the money then left «تحصيل الشهر» and the settlement while still counting in
+   «النقد المتوفر» and against the patient's balance, and nothing said why the two stopped
+   agreeing. Every date input that defaults to `today` also carries `min={EARLIEST_RECORD_DATE}`
+   and `max={today}`. **Appointments are the exception** — a booking is in the future by
+   definition, so `lib/actions/appointments.ts` and the `nextAppointment` fields in
+   `lib/actions/ortho.ts` stay on `isValidISODate`.
+7. **Nothing in the UI tells the clinic it is looking at a test system.** No demo banner, no "غير مؤكد", no placeholder or TODO text. Demo data is loaded by `npm run db:demo` before handover, never from inside the app.
 
 ## Commands
-- `npm run db:setup` — migrate + seed (run once; seeds 5 doctors, 11 treatment types, **default PIN 1234**). No prices are seeded — «قائمة الأسعار» was removed 2026-08-19 and every case is priced when it is opened. Doctors are seeded without a lab name; each is set from «الأطباء ← اسم الطبيب».
-- `npm run dev` — dev server. `npm run build && npm start` — production (what the clinic runs).
+- `npm run db:setup` — migrate + seed (run once; seeds 4 doctors, 11 treatment types, **default PIN 1234**). No prices are seeded — «قائمة الأسعار» was removed 2026-08-19 and every case is priced when it is opened. Doctors are seeded without a lab name; each is set from «الأطباء ← اسم الطبيب».
+- `npm run dev` — dev server. `npm run build && npm start` — a production build in a browser,
+  for checking a screen by hand. It is **not** what the clinic runs, and `next start` prints
+  `⚠ "next start" does not work with "output: standalone"` because of it — the warning is
+  accurate and harmless here. The clinic runs `electron/main.js`, which spawns
+  `.next/standalone/server.js` on a random port with `ZUHA_DATA_DIR` pointed at
+  `%APPDATA%\zuha`. To exercise what it actually ships, build the package and launch
+  `dist/win-unpacked/Zuha.exe`; `--user-data-dir=<scratch>` sends it at a throwaway database
+  instead of the clinic's.
 - `npm run db:generate` — new migration after a schema change, then `npm run db:migrate`.
 - **No shell syntax in `package.json` scripts.** npm runs every script through cmd.exe on Windows
   whatever shell you typed it in, so `VAR=value cmd`, `rm -f`, quoted globs and `$(…)` all break on

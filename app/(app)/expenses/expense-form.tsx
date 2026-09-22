@@ -13,6 +13,7 @@ import { MoneySummary } from "@/components/forms/money-summary";
 import { parseAmount } from "@/lib/format";
 import { EXPENSE_CATEGORIES } from "@/lib/strings";
 import { addExpenseAction, type ExpenseFormState } from "@/lib/actions/expenses";
+import { EARLIEST_RECORD_DATE } from "@/lib/dates";
 
 export function ExpenseForm({
   today,
@@ -60,6 +61,8 @@ export function ExpenseForm({
                 name="date"
                 type="date"
                 defaultValue={today}
+                min={EARLIEST_RECORD_DATE}
+                max={today}
                 className="h-11"
               />
             </div>

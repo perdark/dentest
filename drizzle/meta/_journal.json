@@ -71,6 +71,13 @@
       "when": 1790027990388,
       "tag": "0009_noisy_killraven",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1790045260734,
+      "tag": "0010_glossy_hobgoblin",
+      "breakpoints": true
     }
   ]
 }

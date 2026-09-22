@@ -13,6 +13,7 @@ import { MoneySummary } from "@/components/forms/money-summary";
 import { parseAmount } from "@/lib/format";
 import { CASH_MOVE_LABELS } from "@/lib/strings";
 import { addCashMovement, type CashState } from "@/lib/actions/cash";
+import { EARLIEST_RECORD_DATE } from "@/lib/dates";
 
 // «صرف حصة طبيب» يُسجَّل من شاشة الحصيلة، فلا يظهر هنا.
 const MANUAL_TYPES = ["reserve", "withdrawal", "owner_draw", "adjustment"] as const;
@@ -63,6 +64,8 @@ export function CashForm({
                 name="moveDate"
                 type="date"
                 defaultValue={today}
+                min={EARLIEST_RECORD_DATE}
+                max={today}
                 className="h-11"
               />
             </div>

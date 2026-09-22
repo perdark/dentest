@@ -13,6 +13,7 @@ import { MoneySummary } from "@/components/forms/money-summary";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { parseAmount } from "@/lib/format";
+import { EARLIEST_RECORD_DATE } from "@/lib/dates";
 
 /**
  * المقدمة: مبلغ يُتفق عليه مرة، ثم يُسدَّد على دفعات.
@@ -203,6 +204,8 @@ function InstalmentForm({
             name="paidDate"
             type="date"
             defaultValue={today}
+            min={EARLIEST_RECORD_DATE}
+            max={today}
             className="h-11"
           />
         </Field>

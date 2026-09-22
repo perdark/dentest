@@ -24,6 +24,8 @@ test("a patient saved with chronic conditions carries the warning into the list"
   await expect(dialog).toBeVisible();
 
   await dialog.getByLabel("الاسم الكامل").fill(PATIENT);
+  // «الطبيب المسؤول» مطلوب منذ 2026-09-22 — بدونه لا يُرسل النموذج أصلاً.
+  await dialog.getByLabel("الطبيب المسؤول").selectOption({ index: 1 });
 
   // Clicking the visible label is what the secretary does; it also proves the
   // label is wired to the box, which is the whole point of the tick grid.
@@ -39,6 +41,28 @@ test("a patient saved with chronic conditions carries the warning into the list"
   const row = list.getByRole("row").filter({ hasText: PATIENT }).first();
   await expect(row).toContainText("سكري");
   await expect(row).toContainText("حساسية");
+});
+
+/**
+ * الطبيب المسؤول مطلوب: النموذج لا يُرسل بدونه، والمريض لا يُنشأ.
+ *
+ * ما يحميه هذا الاختبار هو أن الخيار الفارغ ما زال موجوداً ومعطّلاً. لو حُذف
+ * لاختار المتصفّح أول طبيب تلقائياً، فيمرّ الحفظ صامتاً ويُنسب المريض إلى
+ * طبيب لم يخترْه أحد — وهو خطأ لا تراه أي شاشة بعد وقوعه.
+ */
+test("a patient cannot be saved without a doctor", async ({ page }) => {
+  const name = "مريض بلا طبيب";
+  await page.goto("/patients");
+
+  await page.getByRole("button", { name: "إضافة مريض" }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("الاسم الكامل").fill(name);
+  await dialog.getByRole("button", { name: "إضافة", exact: true }).click();
+
+  // الحوار باقٍ مفتوحاً، ولا شيء وصل إلى قاعدة البيانات.
+  await expect(dialog).toBeVisible();
+  await page.goto(`/patients?q=${encodeURIComponent(name)}`);
+  await expect(page.getByText("لا توجد نتائج مطابقة لبحثك.")).toBeVisible();
 });
 
 test("the patient file opens with the health warning above everything else", async ({

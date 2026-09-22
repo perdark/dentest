@@ -10,7 +10,7 @@ import {
   payoutShortfall,
 } from "@/lib/settlement-math";
 import { formatIQD } from "@/lib/format";
-import { formatPeriodAr } from "@/lib/dates";
+import { formatPeriodAr, EARLIEST_RECORD_DATE } from "@/lib/dates";
 import { SETTLEMENT_STATUS_LABELS } from "@/lib/strings";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -559,6 +559,8 @@ function PayoutDialog({
                 name="date"
                 type="date"
                 defaultValue={today}
+                min={EARLIEST_RECORD_DATE}
+                max={today}
                 className="h-11"
                 aria-invalid={Boolean(state.error)}
                 autoFocus

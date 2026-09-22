@@ -20,7 +20,7 @@ import {
 } from "@/lib/db/schema";
 import { isValidToothCode, type Surface } from "@/lib/db/teeth";
 import { recordEdit, nextCounter } from "@/lib/server-utils";
-import { isValidISODate, monthOf } from "@/lib/dates";
+import { isValidISODate, isRecordableDate, monthOf } from "@/lib/dates";
 import { ORTHO_BUCKET, XRAY_BUCKET } from "@/lib/strings";
 
 function atomicMutation<TArgs extends unknown[], TResult>(
@@ -48,6 +48,7 @@ export const createPatient = atomicMutation((input: {
   notes?: string | null;
   medicalFlags?: string[];
   medicalNotes?: string | null;
+  doctorId?: number | null;
 }): number => {
   const res = db
     .insert(patients)
@@ -58,6 +59,7 @@ export const createPatient = atomicMutation((input: {
       notes: input.notes?.trim() || null,
       medicalFlags: serializeMedicalFlags(input.medicalFlags),
       medicalNotes: input.medicalNotes?.trim() || null,
+      doctorId: input.doctorId ?? null,
     })
     .run();
   const id = Number(res.lastInsertRowid);
@@ -74,6 +76,7 @@ export const updatePatient = atomicMutation((
     notes: string | null;
     medicalFlags: string[];
     medicalNotes: string | null;
+    doctorId: number | null;
   }>,
 ): void => {
   const before = db.select().from(patients).where(eq(patients.id, id)).get();
@@ -283,6 +286,15 @@ function isOpenEndedOrtho(treatmentTypeId: number, totalPrice: number): boolean 
 
 /** Create a case; allocate implant card + account numbers if it's an implant. */
 export const createCase = atomicMutation((input: NewCaseInput): number => {
+  // 🔴 Throws rather than returning a result: every caller already validates
+  // the date it passes, so reaching here with a bad one is a bug in a new
+  // caller, not a mistyped form. `recordEdit` below stamps the audit period
+  // from this date and `createCaseWithPayment` hands it to the first payment,
+  // so a case opened in 2099 takes its money out of the month's books with
+  // it. [2026-09-22]
+  if (!isRecordableDate(input.openedDate)) {
+    throw new Error(`Case opened date is not recordable: ${input.openedDate}`);
+  }
   const tt = db.select().from(treatmentTypes).where(eq(treatmentTypes.id, input.treatmentTypeId)).get();
   let implantCardNo: number | null = null;
   let accountSeqNo: number | null = null;
@@ -392,6 +404,7 @@ export type PaymentFailure =
   | "case_cancelled"
   | "invalid_amount"
   | "invalid_date"
+  | "future_date"
   | "wrong_course"
   | "exceeds_remaining"
   | "exceeds_down_payment"
@@ -407,6 +420,7 @@ export function paymentFailureMessage(reason: PaymentFailure): string {
     case_cancelled: "لا يمكن إضافة دفعة على حالة ملغاة.",
     invalid_amount: "أدخل مبلغاً صحيحاً أكبر من صفر.",
     invalid_date: "التاريخ غير صحيح.",
+    future_date: "لا يمكن تسجيل دفعة بتاريخ لاحق لليوم — تحقّق من السنة.",
     wrong_course: "الحالة لا تنتمي إلى سجل العلاج المطلوب.",
     exceeds_remaining: "المبلغ أكبر من الرصيد المتبقي.",
     exceeds_down_payment: "المبلغ أكبر من المتبقي من المقدمة المتفق عليها.",
@@ -459,6 +473,12 @@ export const recordCasePayment = sqlite.transaction(
     }
     if (!isValidISODate(input.paidDate)) {
       return { ok: false, reason: "invalid_date" };
+    }
+    // A payment cannot have happened tomorrow. Separated from the calendar
+    // check so the message can name the real mistake — a mistyped year, which
+    // is what this catches. See `isRecordableDate`. [2026-09-22]
+    if (!isRecordableDate(input.paidDate)) {
+      return { ok: false, reason: "future_date" };
     }
 
     const treatmentCase = db.select().from(cases).where(eq(cases.id, input.caseId)).get();
@@ -604,6 +624,7 @@ export const createCaseWithPayment = sqlite.transaction(
  */
 export type XrayFilmFailure =
   | "invalid_date"
+  | "future_date"
   | "invalid_price"
   | "not_xray_type";
 
@@ -614,6 +635,7 @@ export type XrayFilmResult =
 export function xrayFilmFailureMessage(reason: XrayFilmFailure): string {
   const messages = {
     invalid_date: "التاريخ غير صحيح.",
+    future_date: "لا يمكن تسجيل فيلم بتاريخ لاحق لليوم — تحقّق من السنة.",
     invalid_price: "أدخل سعراً صحيحاً (صفر أو أكثر).",
     not_xray_type: "النوع المختار ليس نوع أشعة.",
   } satisfies Record<XrayFilmFailure, string>;
@@ -628,6 +650,11 @@ export const recordXrayFilm = atomicMutation((input: {
 }): XrayFilmResult => {
   if (!isValidISODate(input.filmDate)) {
     return { ok: false, reason: "invalid_date" };
+  }
+  // X-ray money is the clinic's income (D9), so a film dated years ahead walks
+  // out of the month's books exactly like a payment does. [2026-09-22]
+  if (!isRecordableDate(input.filmDate)) {
+    return { ok: false, reason: "future_date" };
   }
   if (!Number.isSafeInteger(input.price) || input.price < 0) {
     return { ok: false, reason: "invalid_price" };

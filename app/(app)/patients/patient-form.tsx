@@ -17,10 +17,14 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { NativeSelect } from "@/components/forms/native-select";
 import { SubmitButton } from "@/components/forms/submit-button";
 import { useActionToast } from "@/components/forms/use-action-toast";
 import { FormError } from "@/components/forms/form-error";
 import type { Patient } from "@/lib/db/schema";
+
+/** ما يحتاجه الـ select فقط، لا صف الطبيب كاملاً. */
+export type DoctorOption = { id: number; name: string; isActive: boolean };
 import {
   MEDICAL_FLAGS,
   MEDICAL_FLAG_LABELS,
@@ -35,9 +39,12 @@ import {
 export function PatientForm({
   mode = "create",
   patient,
+  doctors,
 }: {
   mode?: "create" | "edit";
   patient?: Patient;
+  /** الأطباء المفعّلون — تأتي من الخادم لأن هذا مكوّن عميل. */
+  doctors: DoctorOption[];
 }) {
   const isEdit = mode === "edit";
   const [state, formAction] = useActionState<PatientFormState, FormData>(
@@ -108,6 +115,29 @@ export function PatientForm({
               className="h-11 text-start"
               placeholder="07XXXXXXXXX"
             />
+          </div>
+
+          {/* الطبيب المسؤول — مطلوب. الخيار الفارغ معطّل لا محذوف: لو حُذف
+              لاختار المتصفّح أول طبيب في القائمة تلقائياً، فيُحفظ مريض باسم
+              طبيب لم يخترْه أحد. الطبيب المعالج لكل حالة يبقى مأخوذاً من
+              الحالة نفسها لا من هنا. */}
+          <div className="space-y-1.5">
+            <Label htmlFor="patient-doctorId">الطبيب المسؤول</Label>
+            <NativeSelect
+              id="patient-doctorId"
+              name="doctorId"
+              required
+              defaultValue={patient?.doctorId ? String(patient.doctorId) : ""}
+            >
+              <option value="" disabled>
+                اختر الطبيب
+              </option>
+              {doctors.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.isActive ? d.name : `${d.name} (غير مفعّل)`}
+                </option>
+              ))}
+            </NativeSelect>
           </div>
 
           <div className="space-y-1.5">

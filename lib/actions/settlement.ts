@@ -9,7 +9,7 @@ import {
   finalizeSettlementPayout,
 } from "@/lib/settlement";
 import { requireAuth } from "@/lib/auth";
-import { todayISO, isValidISODate } from "@/lib/dates";
+import { todayISO, isRecordableDate } from "@/lib/dates";
 
 const PERIOD_RE = /^\d{4}-\d{2}$/;
 
@@ -97,7 +97,7 @@ export async function markPaid(
   }
   const d = parsed.data;
 
-  const date = isValidISODate(d.date) ? d.date : todayISO();
+  const date = isRecordableDate(d.date) ? d.date : todayISO();
   const result = finalizeSettlementPayout({
     period: d.period,
     doctorId: d.doctorId,

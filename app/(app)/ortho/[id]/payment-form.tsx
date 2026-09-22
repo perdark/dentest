@@ -9,6 +9,7 @@ import { MoneySummary } from "@/components/forms/money-summary";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { parseAmount } from "@/lib/format";
+import { EARLIEST_RECORD_DATE } from "@/lib/dates";
 
 export function OrthoPaymentForm({
   caseId,
@@ -83,6 +84,8 @@ export function OrthoPaymentForm({
             name="paidDate"
             type="date"
             defaultValue={today}
+            min={EARLIEST_RECORD_DATE}
+            max={today}
             className="h-11"
           />
         </Field>

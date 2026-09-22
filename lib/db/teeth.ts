@@ -192,8 +192,9 @@ export const TEETH: Tooth[] = build();
 
 export const TEETH_BY_CODE: ReadonlyMap<number, Tooth> = new Map(TEETH.map((t) => [t.code, t]));
 
-export const PERMANENT_TEETH = TEETH.filter((t) => t.dentition === "permanent");
-export const PRIMARY_TEETH = TEETH.filter((t) => t.dentition === "primary");
+// `PERMANENT_TEETH` / `PRIMARY_TEETH` pre-filtered the table by dentition. The
+// odontogram builds its own arch rows from `TEETH` and nothing else asked, so
+// both were removed on 2026-09-22 along with `posteriorTeeth` below.
 
 export function getTooth(code: number): Tooth | undefined {
   return TEETH_BY_CODE.get(code);
@@ -251,8 +252,5 @@ export function anteriorTeeth(arch?: Arch): Tooth[] {
   );
 }
 
-export function posteriorTeeth(arch?: Arch): Tooth[] {
-  return TEETH.filter(
-    (t) => t.dentition === "permanent" && !t.anterior && (!arch || t.arch === arch),
-  );
-}
+// `posteriorTeeth(arch?)` was the unused half of the pair — `anteriorTeeth` is
+// read by the surface picker, its complement never was. Removed 2026-09-22.

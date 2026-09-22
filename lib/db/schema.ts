@@ -88,9 +88,28 @@ export const patients = sqliteTable(
     // Free text beside the flags: the medicine, the kind of allergy, anything
     // the treating doctor should read before he starts.
     medicalNotes: text("medical_notes"),
+    // الطبيب المسؤول: who the patient is registered under, recorded at the desk
+    // before any case exists. **Required** on «المرضى» — both the form and
+    // `lib/actions/patients.ts` refuse to save without it.
+    //
+    // The column stays nullable all the same, and that is not a contradiction:
+    // every patient registered before 2026-09-22 has no answer to give, and a
+    // NOT NULL would have to invent one for each of them. NULL therefore means
+    // exactly "registered before the field existed" — no new record can produce
+    // it. `findOrCreatePatient` (appointment booking) is the other writer that
+    // can leave it NULL; the booking screen keeps its own optional doctor.
+    //
+    // This is the *registration* doctor, not the treating one: the doctor who
+    // actually did the work is always `cases.doctor_id`, and money (settlement,
+    // commission, lab) reads that column only. Nothing here touches D1–D9.
+    doctorId: integer("doctor_id").references(() => doctors.id),
     createdAt: ts(),
   },
-  (t) => [index("patients_name_idx").on(t.fullName), index("patients_phone_idx").on(t.phone)],
+  (t) => [
+    index("patients_name_idx").on(t.fullName),
+    index("patients_phone_idx").on(t.phone),
+    index("patients_doctor_idx").on(t.doctorId),
+  ],
 );
 
 // ── Treatment types (fixed, seeded) ─────────────────────────────────────────

@@ -4,7 +4,7 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { addExpense, deleteExpense } from "@/lib/mutations";
 import { parseAmount } from "@/lib/format";
-import { todayISO, isValidISODate } from "@/lib/dates";
+import { todayISO, isRecordableDate } from "@/lib/dates";
 import { requireAuth } from "@/lib/auth";
 
 export type ExpenseFormState = { ok?: boolean; error?: string };
@@ -44,7 +44,7 @@ export async function addExpenseAction(
   if (amount <= 0) {
     return { error: "أدخل مبلغاً صحيحاً أكبر من صفر" };
   }
-  const date = isValidISODate(d.date) ? d.date : todayISO();
+  const date = isRecordableDate(d.date) ? d.date : todayISO();
 
   addExpense({
     expenseDate: date,

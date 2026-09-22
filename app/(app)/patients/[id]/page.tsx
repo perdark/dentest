@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowRight, Grid2x2, HeartPulse, MapPin, Phone, PhoneOff } from "lucide-react";
+import { ArrowRight, Grid2x2, HeartPulse, MapPin, Phone, PhoneOff, Stethoscope } from "lucide-react";
 import {
   patientById,
   casesForPatient,
+  listDoctors,
   teethForCase,
   patientToothHistory,
 } from "@/lib/queries";
@@ -41,6 +42,25 @@ export default async function PatientProfilePage({
   if (!patient) notFound();
 
   const medicalLine = medicalFlagsLine(patient.medicalFlags);
+
+  /*
+   * الأطباء المعروضون في «تعديل»: المفعّلون، ومعهم طبيب هذا المريض إن كان قد
+   * أُوقف بعد تسجيله. بدون هذا الاستثناء يفتح الموظف نافذة التعديل ليغيّر رقم
+   * الهاتف فيجد خانة الطبيب فارغة، ويمسح بالحفظ ارتباطاً لم يقصد لمسه.
+   */
+  const activeDoctors = listDoctors({ activeOnly: true });
+  const assignedDoctor = patient.doctorId
+    ? listDoctors().find((d) => d.id === patient.doctorId)
+    : undefined;
+  const doctorOptions = [
+    ...(activeDoctors.length > 0 ? activeDoctors : listDoctors()),
+    ...(assignedDoctor && !activeDoctors.some((d) => d.id === assignedDoctor.id)
+      ? [assignedDoctor]
+      : []),
+  ]
+    .filter((d, i, all) => all.findIndex((x) => x.id === d.id) === i)
+    .map((d) => ({ id: d.id, name: d.name, isActive: d.isActive }));
+
   const cases = casesForPatient(patient.id);
   // Marked-tooth count per case, so the file shows at a glance which visits
   // were charted and which are still prose in a note.
@@ -99,6 +119,12 @@ export default async function PatientProfilePage({
                   <EmptyValue>لا يوجد رقم هاتف</EmptyValue>
                 </p>
               )}
+              {assignedDoctor ? (
+                <p className="flex items-center gap-1.5">
+                  <Stethoscope className="text-muted-foreground size-4 shrink-0" />
+                  {assignedDoctor.name}
+                </p>
+              ) : null}
               {patient.address ? (
                 <p className="flex items-center gap-1.5">
                   <MapPin className="text-muted-foreground size-4 shrink-0" />
@@ -121,7 +147,7 @@ export default async function PatientProfilePage({
               </Alert>
             ) : null}
           </div>
-          <PatientForm mode="edit" patient={patient} />
+          <PatientForm mode="edit" patient={patient} doctors={doctorOptions} />
         </CardContent>
       </Card>
 

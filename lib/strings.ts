@@ -1,18 +1,10 @@
 // Central Arabic UI labels and option lists.
-
-export const TREATMENT_LABELS: Record<string, string> = {
-  implant: "زراعة",
-  ortho: "تقويم",
-  extraction_surgical: "قلع جراحي",
-  extraction_normal: "قلع عادي",
-  filling: "حشوة",
-  bridge: "جسر",
-  cleaning: "تنظيف",
-  xray_panoramic: "أشعة بانوراما",
-  xray_periapical: "أشعة ذروية",
-  xray_cbct: "أشعة ثلاثية الأبعاد",
-  xray_ceph: "أشعة سيفالومترية",
-};
+//
+// `TREATMENT_LABELS` used to sit here, mapping the seeded treatment keys to
+// Arabic names. Nothing has read it since treatments became free text with
+// saved suggestions (2026-08-19) — a treatment carries its own `nameAr` — so
+// it was removed on 2026-09-22 rather than left to drift out of step with the
+// rows it claimed to name.
 
 /**
  * The settlement bucket that holds X-ray work. [D9]
@@ -34,13 +26,6 @@ export const XRAY_BUCKET = "xray";
  * so the rule holds for legacy rows that still carry a stored total.
  */
 export const ORTHO_BUCKET = "ortho";
-
-export const BUCKET_LABELS: Record<string, string> = {
-  implant: "زراعة",
-  ortho: "تقويم",
-  normal: "عمل عادي",
-  xray: "أشعة",
-};
 
 /**
  * Clinic-facing expense categories.
@@ -156,15 +141,22 @@ export function medicalFlagsLine(json: string | null | undefined): string {
     .join("، ");
 }
 
-/**
- * « ⚠ سكري، ضغط الدم» — appended to a picker label so the warning travels with
- * the name into every list the secretary picks a patient from.
- */
-export function medicalFlagsMarker(json: string | null | undefined): string {
-  const line = medicalFlagsLine(json);
-  return line ? ` ⚠ ${line}` : "";
-}
+// `medicalFlagsMarker` appended « ⚠ سكري » to a picker label. Its only caller
+// was the case picker in «دفعة على علاج سابق», removed with that dialog in
+// 1923cc0; the screens that still show a warning render a `MedicalBadge`
+// instead. Removed 2026-09-22.
 
+/**
+ * Every kind a payment row can carry, including the two the clinic can no
+ * longer choose.
+ *
+ * ⚠️ «مقدمة» is still WRITTEN — by a new case's first payment, an implant card
+ * and an ortho down payment — it just cannot be picked by hand. «تسوية» is
+ * written by nothing since 2026-09-22 and is kept here only so rows recorded
+ * under it before then still read as something in the daily ledger. Deleting
+ * either label turns an old row into a bare `adjustment` on screen. See
+ * `app/(app)/debts/pay-dialog.tsx`.
+ */
 export const PAYMENT_KIND_LABELS: Record<string, string> = {
   down_payment: "مقدمة",
   session: "جلسة",

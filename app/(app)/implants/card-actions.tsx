@@ -26,6 +26,7 @@ import {
   addImplantSession,
   type ImplantFormState,
 } from "@/lib/actions/implants";
+import { EARLIEST_RECORD_DATE } from "@/lib/dates";
 
 type CardData = {
   caseId: number;
@@ -294,6 +295,8 @@ function SessionDialog({
               name="date"
               type="date"
               defaultValue={today}
+              min={EARLIEST_RECORD_DATE}
+              max={today}
               className="h-11"
             />
           </div>

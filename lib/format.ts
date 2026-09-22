@@ -13,14 +13,10 @@ export function formatNumber(amount: number | null | undefined): string {
   return nf.format(amount ?? 0);
 }
 
-/** Short form for dashboards: 12,500,000 -> "12.5M". */
-export function formatIQDShort(amount: number | null | undefined): string {
-  const n = amount ?? 0;
-  const abs = Math.abs(n);
-  if (abs >= 1_000_000) return `${(n / 1_000_000).toFixed(abs % 1_000_000 === 0 ? 0 : 1)}M د.ع`;
-  if (abs >= 1_000) return `${(n / 1_000).toFixed(0)}K د.ع`;
-  return formatIQD(n);
-}
+// `formatIQDShort` abbreviated dashboard figures as "12.5M د.ع". No screen
+// ever used it: the clinic reads exact dinars everywhere, and an abbreviated
+// total on a money screen is a rounding the owner cannot check. Removed
+// 2026-09-22.
 
 /** Parse user input ("12,500,000" / "12.5m") to an integer dinar amount. */
 export function parseAmount(input: string | number | null | undefined): number {

@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { formatDateShort, formatDateShortY, formatTime12 } from "@/lib/dates";
+import {
+  EARLIEST_RECORD_DATE,
+  formatDateShort,
+  formatDateShortY,
+  formatTime12,
+  isRecordableDate,
+  isValidISODate,
+} from "@/lib/dates";
 
 /**
  * كيف تُقرأ التواريخ والأوقات على الشاشة — طلب العيادة 2026-08-24.
@@ -66,4 +73,42 @@ test("formatDateShort — الفارغ يبقى فارغاً وغير المقر
   assert.equal(formatDateShortY(null), "");
   assert.equal(formatDateShortY("2026-08"), "2026-08");
   assert.equal(formatDateShortY("2026-00-10"), "2026-00-10");
+});
+
+/**
+ * 🔴 The window a RECORD's date has to sit in — the gap that let a payment be
+ * dated 2099.
+ *
+ * `isValidISODate` answers "is this a day on a calendar", which «2099-12-31»
+ * is, so it passed every check in the app. A payment saved there leaves
+ * «تحصيل الشهر» and the monthly settlement while still counting in «النقد
+ * المتوفر» and in the patient's balance, so the two figures the owner
+ * reconciles stop agreeing with nothing to explain why. `today` is injected
+ * rather than read from the clock: a test that asserts on "tomorrow" has to
+ * say which day it means or it passes for the wrong reason.
+ */
+test("isRecordableDate — اليوم وما قبله مقبول، والغد مرفوض", () => {
+  const today = "2026-09-22";
+  assert.equal(isRecordableDate("2026-09-22", today), true);
+  assert.equal(isRecordableDate("2026-09-21", today), true);
+  assert.equal(isRecordableDate("2020-01-01", today), true);
+
+  assert.equal(isRecordableDate("2026-09-23", today), false);
+  assert.equal(isRecordableDate("2099-12-31", today), false);
+  assert.equal(isRecordableDate("2062-09-22", today), false, "سنة مكتوبة خطأً");
+  assert.equal(isRecordableDate("2019-12-31", today), false);
+  assert.equal(isRecordableDate("1900-01-01", today), false);
+});
+
+test("isRecordableDate — ما يرفضه التقويم يبقى مرفوضاً", () => {
+  const today = "2026-09-22";
+  // Every calendar rejection still applies: the window narrows the valid set,
+  // it does not replace the validity check.
+  for (const bad of ["", "2026-02-31", "2026-13-01", "2026-9-2", "اليوم", "2026-09"]) {
+    assert.equal(isValidISODate(bad), false, bad);
+    assert.equal(isRecordableDate(bad, today), false, bad);
+  }
+  // The floor is a constant the date inputs also read as their `min`.
+  assert.equal(EARLIEST_RECORD_DATE, "2020-01-01");
+  assert.equal(isRecordableDate(EARLIEST_RECORD_DATE, today), true);
 });

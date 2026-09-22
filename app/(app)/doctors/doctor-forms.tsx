@@ -20,7 +20,7 @@ import { useActionToast } from "@/components/forms/use-action-toast";
 import { FormError } from "@/components/forms/form-error";
 import { MoneySummary } from "@/components/forms/money-summary";
 import { formatIQD, parseAmount } from "@/lib/format";
-import { formatDateAr } from "@/lib/dates";
+import { formatDateAr, EARLIEST_RECORD_DATE } from "@/lib/dates";
 import { LAB_BRANCH_LABELS } from "@/lib/strings";
 import {
   addDoctor,
@@ -295,6 +295,8 @@ export function LabEntryForm({ doctorId, today }: { doctorId: number; today: str
             name="entryDate"
             type="date"
             defaultValue={today}
+            min={EARLIEST_RECORD_DATE}
+            max={today}
             className="h-11"
           />
         </div>

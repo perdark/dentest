@@ -4,7 +4,7 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { recordCashMovement } from "@/lib/mutations";
 import { parseAmount } from "@/lib/format";
-import { todayISO, isValidISODate } from "@/lib/dates";
+import { todayISO, isRecordableDate } from "@/lib/dates";
 import { requireAuth } from "@/lib/auth";
 
 export type CashState = { ok?: boolean; error?: string };
@@ -36,7 +36,7 @@ export async function addCashMovement(
   const magnitude = Math.max(0, parseAmount(d.amount));
   if (magnitude <= 0) return { error: "أدخل مبلغاً صحيحاً أكبر من صفر" };
 
-  const moveDate = isValidISODate(d.moveDate) ? d.moveDate : todayISO();
+  const moveDate = isRecordableDate(d.moveDate) ? d.moveDate : todayISO();
 
   recordCashMovement({
     moveDate,

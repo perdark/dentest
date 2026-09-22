@@ -44,7 +44,8 @@ export default async function DailyPage({
   searchParams: Promise<{ date?: string }>;
 }) {
   const sp = await searchParams;
-  const date = sp.date && isValidISODate(sp.date) ? sp.date : todayISO();
+  const today = todayISO();
+  const date = sp.date && isValidISODate(sp.date) ? sp.date : today;
 
   const rows = dailyLedger(date);
   // الأشعة لا دفعات لها: الفيلم مدفوع بتاريخه، فيُقرأ من سجله ويدخل إجمالي
@@ -86,7 +87,14 @@ export default async function DailyPage({
           <p className="text-base font-medium">{formatDateAr(date)}</p>
         </div>
         <div data-tour="daily-add">
-          <EntryDialog doctors={doctors} treatments={treatments} date={date} />
+          {/* «التالي» can walk the ledger into tomorrow, but a case cannot be
+              opened there — the dialog clamps its own date to today. */}
+          <EntryDialog
+            doctors={doctors}
+            treatments={treatments}
+            date={date}
+            today={today}
+          />
         </div>
       </div>
 

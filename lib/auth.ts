@@ -48,7 +48,7 @@ export async function requireAuth(): Promise<void> {
   if (!(await isAuthed())) redirect("/login");
 }
 
-/** True when no PIN has been configured yet (fresh install). */
-export function isPinSet(): boolean {
-  return !!getSettings().pinHash;
-}
+// `isPinSet()` reported whether a PIN had been configured yet. Nothing asked:
+// `lib/db/seed.ts` sets the default PIN on first start and `instrumentation.ts`
+// runs the seed on every boot, so there is no "fresh install with no PIN" state
+// for a screen to branch on. Removed 2026-09-22.
