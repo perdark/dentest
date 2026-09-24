@@ -115,12 +115,6 @@ export default function DashboardPage() {
           hero
           label="النقد المتوفر"
           value={formatIQD(stats.cash)}
-          amber={stats.overReserve}
-          note={
-            stats.overReserve
-              ? `أعلى من حد الاحتياطي (${formatIQD(stats.reserveThreshold)})`
-              : undefined
-          }
         />
 
         <div className="flex flex-col gap-2">

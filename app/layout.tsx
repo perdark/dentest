@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { cookies } from "next/headers";
 import { Providers } from "@/components/providers";
+import { THEME_COOKIE, parseTheme } from "@/lib/theme";
 
 // Cairo is self-hosted in app/globals.css from /public/fonts — NOT next/font/
 // google, which fetches from Google at build time and would break a rebuild on
@@ -13,13 +15,21 @@ export const metadata: Metadata = {
   description: "نظام سجلات وحسابات عيادة الأسنان",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  const theme = parseTheme((await cookies()).get(THEME_COOKIE)?.value);
   return (
-    <html lang="ar" dir="rtl" className="h-full antialiased">
+    <html
+      lang="ar"
+      dir="rtl"
+      className={theme === "dark" ? "dark h-full antialiased" : "h-full antialiased"}
+      style={{ colorScheme: theme }}
+      // ThemeToggle flips the class before the refresh re-renders it.
+      suppressHydrationWarning
+    >
       <body className="bg-background text-foreground min-h-full">
-        <Providers>{children}</Providers>
+        <Providers theme={theme}>{children}</Providers>
       </body>
     </html>
   );

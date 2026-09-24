@@ -804,6 +804,40 @@ export const setCaseTeeth = atomicMutation(
   },
 );
 
+/**
+ * Open a case, take its first payment and chart its teeth — all or nothing.
+ *
+ * «إضافة علاج» on the patient file does the three in one save, and a chart the
+ * mutations layer refuses (a duplicate tooth, a bad face) must not leave a case
+ * and a payment behind without it: the clerk would fix the chart, save again,
+ * and open the same treatment twice. The throw is what rolls the transaction
+ * back; it never leaves this function.
+ */
+class ToothChartRejected extends Error {
+  constructor(readonly reason: ToothMarkFailure) {
+    super(reason);
+  }
+}
+
+export function createCaseWithTeeth(
+  input: Parameters<typeof createCaseWithPayment>[0] & { marks: ToothMarkInput[] },
+): { ok: true; caseId: number } | { ok: false; reason: ToothMarkFailure } {
+  const { marks, ...caseInput } = input;
+  try {
+    return atomicMutation(() => {
+      const { caseId } = createCaseWithPayment(caseInput);
+      if (marks.length > 0) {
+        const teeth = setCaseTeeth(caseId, marks);
+        if (!teeth.ok) throw new ToothChartRejected(teeth.reason);
+      }
+      return { ok: true as const, caseId };
+    })();
+  } catch (e) {
+    if (e instanceof ToothChartRejected) return { ok: false, reason: e.reason };
+    throw e;
+  }
+}
+
 
 // ── Appointments (السجل الرئيسي: اسم المراجع + موعده) [B1] ────────────────────
 // Deliberately holds NO clinical detail — the clinic was explicit that this

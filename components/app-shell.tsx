@@ -21,7 +21,6 @@ import {
   LogOut,
   BookOpen,
   Wallet,
-  AlertTriangle,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -29,6 +28,7 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { NAV_ITEMS } from "@/lib/strings";
 import { Tour } from "@/components/tour";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { formatIQD } from "@/lib/format";
 import { logoutAction } from "@/app/(app)/actions";
 
@@ -86,14 +86,12 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
 export function AppShell({
   clinicName,
   cashOnHand,
-  reserveThreshold,
   offerIntro,
   toursSeen,
   children,
 }: {
   clinicName: string;
   cashOnHand: number;
-  reserveThreshold: number;
   /** System nobody has used for real yet — the intro tour may open itself. */
   offerIntro: boolean;
   /** Pathnames whose tour is done. From the database, not localStorage. */
@@ -102,7 +100,6 @@ export function AppShell({
 }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
-  const overReserve = cashOnHand > reserveThreshold;
 
   const sidebar = (
     <div className="flex h-full flex-col">
@@ -153,31 +150,19 @@ export function AppShell({
 
           {/* Keyed on the route so a tour never survives a navigation:
               its steps describe the screen it was opened on. */}
+          <ThemeToggle />
+
           <Tour key={pathname} offerIntro={offerIntro} toursSeen={toursSeen} />
 
-          {/* أهم رقم في الواجهة: يُقرأ من بعيد، والحالة مكتوبة لا لوناً فقط. */}
+          {/* أهم رقم في الواجهة: يُقرأ من بعيد. */}
           <div
             data-tour="cash"
-            className={cn(
-              "flex items-center gap-2 rounded-md border px-2.5 py-1",
-              overReserve ? "border-amber-500/40 bg-amber-50 text-amber-900" : "bg-muted/40",
-            )}
+            className="bg-muted/40 flex items-center gap-2 rounded-md border px-2.5 py-1"
             title="النقد المتوفر"
           >
-            {overReserve ? (
-              <AlertTriangle className="size-5 shrink-0 text-amber-600" />
-            ) : (
-              <Wallet className="text-muted-foreground size-5 shrink-0" />
-            )}
+            <Wallet className="text-muted-foreground size-5 shrink-0" />
             <span className="flex flex-col leading-tight">
-              <span
-                className={cn(
-                  "text-xs",
-                  overReserve ? "text-amber-900" : "text-muted-foreground",
-                )}
-              >
-                {overReserve ? "أعلى من حد الاحتياطي" : "النقد المتوفر"}
-              </span>
+              <span className="text-muted-foreground text-xs">النقد المتوفر</span>
               <span className="money text-base font-bold sm:text-lg">
                 {formatIQD(cashOnHand)}
               </span>

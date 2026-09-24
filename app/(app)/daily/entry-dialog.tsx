@@ -19,6 +19,7 @@ import { SubmitButton } from "@/components/forms/submit-button";
 import { useActionToast } from "@/components/forms/use-action-toast";
 import { FormError } from "@/components/forms/form-error";
 import { MoneySummary } from "@/components/forms/money-summary";
+import { PatientPicker } from "@/components/forms/patient-picker";
 import { parseAmount } from "@/lib/format";
 import { createVisitNewCase, type VisitFormState } from "@/lib/actions/visits";
 import { EARLIEST_RECORD_DATE } from "@/lib/dates";
@@ -53,14 +54,14 @@ export function EntryDialog({
         <Plus className="size-4" />
         تسجيل جديد
       </DialogTrigger>
-      <DialogContent className="sm:max-w-md" initialFocus={nameRef}>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-md" initialFocus={nameRef}>
         <DialogHeader>
           <DialogTitle>تسجيل جديد</DialogTitle>
           {/* هذه النافذة تفتح حساباً جديداً فقط. تسديد حالة مفتوحة يجري من
               «الديون ← إضافة دفعة» حيث تُختار الحالة برصيدها. */}
           <DialogDescription>
-            هذه النافذة تفتح حساب علاج جديد. إذا كان المريض يسدّد على حالة
-            مفتوحة، سجّل الدفعة من شاشة «الديون».
+            هذه النافذة تفتح حساب علاج جديد — لمريض جديد أو لمريض مسجّل. إذا
+            كان المريض يسدّد على حالة مفتوحة، سجّل الدفعة من شاشة «الديون».
           </DialogDescription>
         </DialogHeader>
         <NewCaseForm
@@ -110,34 +111,38 @@ function NewCaseForm({
 
   return (
     <form action={formAction} className="space-y-3 pt-3">
-      <div className="space-y-2">
-        <Label htmlFor="nc-name">اسم المريض</Label>
-        <Input
-          id="nc-name"
-          ref={nameRef}
-          name="patientName"
-          required
-          autoComplete="off"
-          className="h-11"
-          placeholder="الاسم الكامل"
-        />
-      </div>
+      <PatientPicker idPrefix="nc">
+        <div className="space-y-3">
+          <div className="space-y-2">
+            <Label htmlFor="nc-name">اسم المريض</Label>
+            <Input
+              id="nc-name"
+              ref={nameRef}
+              name="patientName"
+              required
+              autoComplete="off"
+              className="h-11"
+              placeholder="الاسم الكامل"
+            />
+          </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="nc-phone">رقم الهاتف (اختياري)</Label>
-        {/* الأرقام تُكتب وتُقرأ من اليسار حتى داخل صفحة عربية، ولوحة الهاتف
-            تفتح على الأرقام مباشرة. */}
-        <Input
-          id="nc-phone"
-          name="phone"
-          type="tel"
-          inputMode="tel"
-          dir="ltr"
-          autoComplete="off"
-          className="h-11 text-start"
-          placeholder="07XXXXXXXXX"
-        />
-      </div>
+          <div className="space-y-2">
+            <Label htmlFor="nc-phone">رقم الهاتف (اختياري)</Label>
+            {/* الأرقام تُكتب وتُقرأ من اليسار حتى داخل صفحة عربية، ولوحة الهاتف
+                تفتح على الأرقام مباشرة. */}
+            <Input
+              id="nc-phone"
+              name="phone"
+              type="tel"
+              inputMode="tel"
+              dir="ltr"
+              autoComplete="off"
+              className="h-11 text-start"
+              placeholder="07XXXXXXXXX"
+            />
+          </div>
+        </div>
+      </PatientPicker>
 
       <div className="space-y-2">
         <Label htmlFor="nc-doctor">الطبيب</Label>

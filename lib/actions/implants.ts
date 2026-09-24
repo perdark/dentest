@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
-import { listTreatmentTypes } from "@/lib/queries";
+import { listTreatmentTypes, patientById } from "@/lib/queries";
 import {
   findOrCreatePatient,
   createCaseWithPayment,
@@ -27,7 +27,10 @@ const optionalText = z.string().optional().default("");
 
 // ── إنشاء بطاقة زراعة جديدة ───────────────────────────────────────────────────
 const createSchema = z.object({
-  fullName: z.string().trim().min(1, "اسم المريض مطلوب"),
+  // Set when «مريض مسجّل» was picked; otherwise a new patient is made from
+  // the name and phone typed on the card.
+  patientId: z.coerce.number().int().positive().optional(),
+  fullName: z.string().trim().optional().default(""),
   phone: optionalText,
   doctorId: z.coerce.number().int().positive("اختر الطبيب المعالج"),
   address: optionalText,
@@ -47,6 +50,11 @@ export async function createImplantCard(
     return { error: parsed.error.issues[0]?.message ?? "تحقق من البيانات المُدخلة" };
   }
   const d = parsed.data;
+  if (d.patientId !== undefined) {
+    if (!patientById(d.patientId)) return { error: "المريض المختار غير موجود" };
+  } else if (!d.fullName) {
+    return { error: "اسم المريض مطلوب" };
+  }
 
   const implantType = listTreatmentTypes().find((t) => t.isImplant);
   if (!implantType) {
@@ -63,11 +71,13 @@ export async function createImplantCard(
     return { error: "الدفعة الأولى أكبر من إجمالي العلاج" };
   }
 
-  const patientId = findOrCreatePatient({
-    fullName: d.fullName,
-    phone: d.phone || null,
-    address: d.address || null,
-  });
+  const patientId =
+    d.patientId ??
+    findOrCreatePatient({
+      fullName: d.fullName,
+      phone: d.phone || null,
+      address: d.address || null,
+    });
 
   createCaseWithPayment({
     patientId,
@@ -83,6 +93,7 @@ export async function createImplantCard(
 
   revalidatePath("/implants");
   revalidatePath("/dashboard");
+  revalidatePath(`/patients/${patientId}`);
   return { ok: true };
 }
 

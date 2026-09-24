@@ -18,6 +18,7 @@ import { SubmitButton } from "@/components/forms/submit-button";
 import { useActionToast } from "@/components/forms/use-action-toast";
 import { FormError } from "@/components/forms/form-error";
 import { MoneySummary } from "@/components/forms/money-summary";
+import { PatientPicker } from "@/components/forms/patient-picker";
 import { parseAmount } from "@/lib/format";
 import { createImplantCard, type ImplantFormState } from "@/lib/actions/implants";
 import { EARLIEST_RECORD_DATE } from "@/lib/dates";
@@ -78,36 +79,42 @@ export function NewCard({
           </Button>
         }
       />
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>بطاقة زراعة جديدة</DialogTitle>
           <DialogDescription>
-            تُحتسب القيم على الخادم: الإجمالي = السعر الكلي − الخصم.
+            لمريض جديد أو لمريض مسجّل. الإجمالي = السعر الكلي − الخصم.
           </DialogDescription>
         </DialogHeader>
 
         <form ref={formRef} action={formAction} className="space-y-3">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <PatientPicker idPrefix="nc">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="nc-fullName">اسم المريض</Label>
+                    <Input id="nc-fullName" name="fullName" required className="h-11" />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label htmlFor="nc-phone">الهاتف (اختياري)</Label>
+                    <Input
+                      id="nc-phone"
+                      name="phone"
+                      type="tel"
+                      inputMode="tel"
+                      dir="ltr"
+                      autoComplete="off"
+                      className="h-11 text-start"
+                      placeholder="07XXXXXXXXX"
+                    />
+                  </div>
+                </div>
+              </PatientPicker>
+            </div>
+
             <div className="space-y-1.5 sm:col-span-2">
-              <Label htmlFor="nc-fullName">اسم المريض</Label>
-              <Input id="nc-fullName" name="fullName" required className="h-11" />
-            </div>
-
-            <div className="space-y-1.5">
-              <Label htmlFor="nc-phone">الهاتف (اختياري)</Label>
-              <Input
-                id="nc-phone"
-                name="phone"
-                type="tel"
-                inputMode="tel"
-                dir="ltr"
-                autoComplete="off"
-                className="h-11 text-start"
-                placeholder="07XXXXXXXXX"
-              />
-            </div>
-
-            <div className="space-y-1.5">
               <Label htmlFor="nc-doctorId">الطبيب</Label>
               <NativeSelect
                 id="nc-doctorId"

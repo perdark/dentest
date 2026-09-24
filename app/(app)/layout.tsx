@@ -25,7 +25,6 @@ export default async function AppLayout({
     <AppShell
       clinicName={settings.clinicName}
       cashOnHand={cashOnHand()}
-      reserveThreshold={settings.cashReserveThreshold}
       // A demo install and an empty one are both "nobody has worked here yet",
       // which is exactly when an unprompted walkthrough helps rather than
       // interrupts.

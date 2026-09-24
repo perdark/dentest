@@ -2,8 +2,9 @@
 
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
+import type { Theme } from "@/lib/theme";
 
-export function Providers({ children }: { children: React.ReactNode }) {
+export function Providers({ children, theme }: { children: React.ReactNode; theme: Theme }) {
   return (
     <TooltipProvider delay={200}>
       {children}
@@ -13,6 +14,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
           Arabic sentence without becoming furniture. */}
       <Toaster
         richColors
+        theme={theme}
         position="top-center"
         dir="rtl"
         duration={3500}

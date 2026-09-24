@@ -95,7 +95,7 @@ export default async function CashPage({
       {/* تنبيه تشغيلي: النقد في الصندوق تجاوز الحد المضبوط في «الإعدادات». */}
       {overReserve ? (
         <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-50 px-3 py-3 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
-          <AlertTriangle className="mt-0.5 size-5 shrink-0 text-amber-600" />
+          <AlertTriangle className="mt-0.5 size-5 shrink-0 text-amber-600 dark:text-amber-400" />
           <p className="leading-relaxed">
             النقد المتوفر <span className="money">{formatIQD(cash)}</span> تجاوز حد
             الاحتياطي <span className="money">{formatIQD(settings.cashReserveThreshold)}</span>.

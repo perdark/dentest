@@ -72,5 +72,6 @@ export async function recordDebtPayment(
   revalidatePath("/debts");
   revalidatePath("/daily");
   revalidatePath("/dashboard");
+  revalidatePath("/patients/[id]", "page");
   return { ok: true };
 }

@@ -7,9 +7,10 @@ import {
   listDoctors,
   teethForCase,
   patientToothHistory,
+  normalTreatmentSuggestions,
 } from "@/lib/queries";
 import { formatIQD } from "@/lib/format";
-import { formatDateShortY } from "@/lib/dates";
+import { formatDateShortY, todayISO } from "@/lib/dates";
 import { CASE_STATUS_LABELS, ORTHO_BUCKET, medicalFlagsLine } from "@/lib/strings";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -25,6 +26,8 @@ import {
 } from "@/components/ui/table";
 import { PatientToothChart } from "@/components/tooth-chart/patient-tooth-chart";
 import { PatientForm } from "../patient-form";
+import { PayDialog } from "../../debts/pay-dialog";
+import { AddTreatmentDialog } from "./add-treatment-dialog";
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline"> = {
   open: "default",
@@ -79,6 +82,19 @@ export default async function PatientProfilePage({
       caseId: e.caseId,
       caseStatus: e.caseStatus,
     }));
+  // كم مرة عولج كل سن من قبل — تُرسم خلف مخطط «إضافة علاج».
+  const toothHistory = new Map<number, number>();
+  for (const e of toothEvents) {
+    toothHistory.set(e.toothCode, (toothHistory.get(e.toothCode) ?? 0) + 1);
+  }
+  // «إضافة علاج» يفتح علاجاً عادياً — الزراعة والتقويم من شاشاتهما [D9] —
+  // فيعرض أطباء العمل العادي، ويرجع إلى الكل إن لم يُعلَّم أحد.
+  const normalDoctors = listDoctors({ activeOnly: true, does: "normal" });
+  const treatmentDoctors = (normalDoctors.length > 0 ? normalDoctors : listDoctors()).map(
+    (d) => ({ id: d.id, name: d.name }),
+  );
+  const today = todayISO();
+
   // التقويم لا رصيد عليه: لا يوجد إجمالي متفق عليه، فالفرق بين الإجمالي
   // المحفوظ والمدفوع ليس ديناً. يُستثنى هنا كما يُستثنى في «الديون» حتى لا
   // يقرأ الموظف رقمين متناقضين عن المريض نفسه. [2026-08-19]
@@ -98,65 +114,67 @@ export default async function PatientProfilePage({
         كل المرضى
       </Link>
 
-      {/* بطاقة معلومات المريض */}
-      <Card>
-        <CardContent className="flex items-start justify-between gap-3">
-          <div className="min-w-0 space-y-2">
-            <h1 className="text-xl font-bold">{patient.fullName}</h1>
-            <div className="space-y-1 text-sm">
-              {patient.phone ? (
-                <a
-                  href={`tel:${patient.phone}`}
-                  dir="ltr"
-                  className="text-primary flex min-h-11 w-fit items-center gap-1.5 underline-offset-4 hover:underline"
-                >
-                  <Phone className="size-4 shrink-0" />
-                  <span className="money">{patient.phone}</span>
-                </a>
-              ) : (
-                <p className="flex min-h-11 items-center gap-1.5">
-                  <PhoneOff className="text-muted-foreground size-4 shrink-0" />
-                  <EmptyValue>لا يوجد رقم هاتف</EmptyValue>
-                </p>
-              )}
-              {assignedDoctor ? (
-                <p className="flex items-center gap-1.5">
-                  <Stethoscope className="text-muted-foreground size-4 shrink-0" />
-                  {assignedDoctor.name}
-                </p>
-              ) : null}
-              {patient.address ? (
-                <p className="flex items-center gap-1.5">
-                  <MapPin className="text-muted-foreground size-4 shrink-0" />
-                  {patient.address}
-                </p>
+      {/* بطاقة المريض يميناً والفم يساراً على الشاشة العريضة (أول عمود في
+          RTL هو الأيمن)، وفوق بعضهما على الهاتف. */}
+      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)]">
+        {/* بطاقة معلومات المريض */}
+        <Card className="self-start">
+          <CardContent className="flex items-start justify-between gap-3">
+            <div className="min-w-0 space-y-2">
+              <h1 className="text-xl font-bold">{patient.fullName}</h1>
+              <div className="space-y-1 text-sm">
+                {patient.phone ? (
+                  <a
+                    href={`tel:${patient.phone}`}
+                    dir="ltr"
+                    className="text-primary flex min-h-11 w-fit items-center gap-1.5 underline-offset-4 hover:underline"
+                  >
+                    <Phone className="size-4 shrink-0" />
+                    <span className="money">{patient.phone}</span>
+                  </a>
+                ) : (
+                  <p className="flex min-h-11 items-center gap-1.5">
+                    <PhoneOff className="text-muted-foreground size-4 shrink-0" />
+                    <EmptyValue>لا يوجد رقم هاتف</EmptyValue>
+                  </p>
+                )}
+                {assignedDoctor ? (
+                  <p className="flex items-center gap-1.5">
+                    <Stethoscope className="text-muted-foreground size-4 shrink-0" />
+                    {assignedDoctor.name}
+                  </p>
+                ) : null}
+                {patient.address ? (
+                  <p className="flex items-center gap-1.5">
+                    <MapPin className="text-muted-foreground size-4 shrink-0" />
+                    {patient.address}
+                  </p>
+                ) : null}
+              </div>
+
+              {/* تحذير الحالة الصحية — أعلى الملف، قبل أي رقم أو حالة. */}
+              {medicalLine || patient.medicalNotes ? (
+                <Alert className="border-amber-500/40 bg-amber-50 text-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
+                  <HeartPulse className="text-amber-600 dark:text-amber-400" />
+                  <AlertTitle>حالة صحية يجب الانتباه لها:</AlertTitle>
+                  <AlertDescription className="text-amber-900/90 dark:text-amber-100/90">
+                    {medicalLine ? <p className="font-medium">{medicalLine}</p> : null}
+                    {patient.medicalNotes ? (
+                      <p className="whitespace-pre-line">{patient.medicalNotes}</p>
+                    ) : null}
+                  </AlertDescription>
+                </Alert>
               ) : null}
             </div>
+            <PatientForm mode="edit" patient={patient} doctors={doctorOptions} />
+          </CardContent>
+        </Card>
 
-            {/* تحذير الحالة الصحية — أعلى الملف، قبل أي رقم أو حالة. */}
-            {medicalLine || patient.medicalNotes ? (
-              <Alert className="border-amber-500/40 bg-amber-50 text-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
-                <HeartPulse className="text-amber-600" />
-                <AlertTitle>حالة صحية يجب الانتباه لها:</AlertTitle>
-                <AlertDescription className="text-amber-900/90 dark:text-amber-100/90">
-                  {medicalLine ? <p className="font-medium">{medicalLine}</p> : null}
-                  {patient.medicalNotes ? (
-                    <p className="whitespace-pre-line">{patient.medicalNotes}</p>
-                  ) : null}
-                </AlertDescription>
-              </Alert>
-            ) : null}
-          </div>
-          <PatientForm mode="edit" patient={patient} doctors={doctorOptions} />
-        </CardContent>
-      </Card>
-
-      {/* مخطط الأسنان — صورة الفم المجمّعة قبل جدول الحالات: الطبيب ينظر إلى
-          الفم أولاً، ثم يقرأ الأرقام. */}
-      <div className="space-y-2">
-        <h2 className="text-lg font-semibold">مخطط الأسنان</h2>
-        <Card>
-          <CardContent>
+        {/* مخطط الأسنان — صورة الفم المجمّعة قبل جدول الحالات: الطبيب ينظر إلى
+            الفم أولاً، ثم يقرأ الأرقام. */}
+        <Card className="min-w-0">
+          <CardContent className="space-y-2">
+            <h2 className="text-lg font-semibold">مخطط الأسنان</h2>
             <PatientToothChart events={toothEvents} />
           </CardContent>
         </Card>
@@ -164,11 +182,23 @@ export default async function PatientProfilePage({
 
       {/* الحالات والعلاجات */}
       <div className="space-y-2">
-        <h2 className="text-lg font-semibold">الحالات والعلاجات</h2>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold">الحالات والعلاجات</h2>
+          <AddTreatmentDialog
+            patientId={patient.id}
+            patientName={patient.fullName}
+            doctors={treatmentDoctors}
+            defaultDoctorId={patient.doctorId}
+            treatments={normalTreatmentSuggestions()}
+            history={[...toothHistory]}
+            today={today}
+          />
+        </div>
 
         {cases.length === 0 ? (
           <div className="text-muted-foreground rounded-xl px-4 py-10 text-center ring-1 ring-foreground/10">
-            لا توجد حالات مسجّلة لهذا المريض.
+            لا توجد حالات لهذا المريض بعد. اضغط «إضافة علاج» لإدخال علاجاته،
+            الجديدة أو القديمة من الدفتر.
           </div>
         ) : (
           <div className="overflow-hidden rounded-xl ring-1 ring-foreground/10">
@@ -183,6 +213,9 @@ export default async function PatientProfilePage({
                   <TableHead className="text-end">المتبقي</TableHead>
                   <TableHead>الحالة</TableHead>
                   <TableHead className="text-end">المخطط</TableHead>
+                  <TableHead>
+                    <span className="sr-only">دفعة</span>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -249,6 +282,18 @@ export default async function PatientProfilePage({
                           ) : null}
                           <Grid2x2 className="size-4" />
                         </Link>
+                      </TableCell>
+                      {/* جلسة على حالة مفتوحة تُضاف من هنا بتاريخها، كما من
+                          «الديون». التقويم يُسدَّد من شاشته. */}
+                      <TableCell className="text-end">
+                        {c.status === "open" && c.bucket !== ORTHO_BUCKET && c.remaining > 0 ? (
+                          <PayDialog
+                            caseId={c.id}
+                            patientName={`${patient.fullName} — ${c.treatment}`}
+                            remaining={c.remaining}
+                            today={today}
+                          />
+                        ) : null}
                       </TableCell>
                     </TableRow>
                   );

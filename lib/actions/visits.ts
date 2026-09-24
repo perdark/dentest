@@ -11,6 +11,7 @@ import {
 import { parseAmount } from "@/lib/format";
 import { isRecordableDate } from "@/lib/dates";
 import { requireAuth } from "@/lib/auth";
+import { patientById } from "@/lib/queries";
 
 export type VisitFormState = { ok?: boolean; error?: string };
 
@@ -28,7 +29,10 @@ export async function createVisitNewCase(
   await requireAuth();
   const parsed = z
     .object({
-      patientName: z.string(),
+      // Set when «مريض مسجّل» was picked: the case goes on that patient's
+      // file and the name/phone fields are not sent at all.
+      patientId: z.coerce.number().int().positive().optional(),
+      patientName: z.string().optional().default(""),
       phone: z.string().optional(),
       doctorId: z.coerce.number(),
       treatmentName: z.string().trim().min(1),
@@ -42,7 +46,11 @@ export async function createVisitNewCase(
   const d = parsed.data;
 
   const patientName = d.patientName.trim();
-  if (!patientName) return { error: "اسم المريض مطلوب" };
+  if (d.patientId !== undefined) {
+    if (!patientById(d.patientId)) return { error: "المريض المختار غير موجود" };
+  } else if (!patientName) {
+    return { error: "اسم المريض مطلوب" };
+  }
   if (!Number.isInteger(d.doctorId) || d.doctorId <= 0) return { error: "اختر الطبيب" };
   // Not just a real calendar day — a day a case can have been opened on. A
   // mistyped year sends the whole case and its first payment out of the
@@ -66,7 +74,8 @@ export async function createVisitNewCase(
   const treatment = findOrCreateTreatmentType(d.treatmentName);
   if (!treatment.ok) return { error: treatmentTypeFailureMessage(treatment.reason) };
 
-  const patientId = findOrCreatePatient({ fullName: patientName, phone: d.phone || null });
+  const patientId =
+    d.patientId ?? findOrCreatePatient({ fullName: patientName, phone: d.phone || null });
 
   createCaseWithPayment({
     patientId,
@@ -81,5 +90,6 @@ export async function createVisitNewCase(
 
   revalidatePath("/daily");
   revalidatePath("/dashboard");
+  revalidatePath(`/patients/${patientId}`);
   return { ok: true };
 }

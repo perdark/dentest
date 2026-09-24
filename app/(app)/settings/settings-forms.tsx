@@ -179,7 +179,7 @@ function AccountingSection({ settings }: { settings: SettingsView }) {
               className="money h-11 text-start"
             />
             <p className="text-muted-foreground text-sm">
-              يظهر تنبيه عندما يتجاوز النقد المتوفر هذا الحد (حالياً {formatIQD(settings.cashReserveThreshold)}).
+              يظهر تنبيه في «الحركات النقدية» عندما يتجاوز النقد المتوفر هذا الحد (حالياً {formatIQD(settings.cashReserveThreshold)}).
             </p>
           </div>
 
