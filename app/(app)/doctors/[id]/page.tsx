@@ -195,6 +195,15 @@ export default async function DoctorPage({
               <Row label="مُحصَّل — تقويم" value={formatIQD(mine.collectedOrtho)} />
               <Row label="مجموع المُحصَّل" value={formatIQD(mine.collectedTotal)} />
               <Row label="النسبة" value={`${mine.commissionPct}%`} />
+              {/* نسبة الطبيب فارغة ⇒ الحصة محسوبة بالبديل القديم من الإعدادات.
+                  يُقال ذلك صراحةً ويُدلّ على مكان ضبطها، بدل رقم يبدو مختاراً. [§18] */}
+              {doctor.commissionPct == null && mine.status !== "closed" ? (
+                <p className="text-muted-foreground text-sm">
+                  النسبة لم تُحدَّد لهذا الطبيب بعد، فالحصة محسوبة بـ{" "}
+                  <span dir="ltr" className="tabular-nums">{mine.commissionPct}%</span>.
+                  حدِّدها من «بيانات الطبيب» أدناه.
+                </p>
+              ) : null}
               {/* خلاصة البطاقة. */}
               <div className="border-primary/30 bg-primary/5 mt-1 rounded-lg border px-3 py-2.5">
                 <Row label="الحصة المستحقة" value={formatIQD(mine.payout)} emphasis />

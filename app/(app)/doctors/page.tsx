@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { ChevronLeft, ChevronRight, Stethoscope } from "lucide-react";
 import { computeSettlement } from "@/lib/settlement";
-import { labDuesForPeriod } from "@/lib/queries";
+import { labDuesForPeriod, listDoctors } from "@/lib/queries";
 import { currentPeriod, formatPeriodAr, shiftPeriod } from "@/lib/dates";
 import { formatIQD } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
@@ -26,6 +26,14 @@ export default async function DoctorsPage({
   // ولا تُعاد كتابتها في أي شاشة. [قاعدة ذهبية]
   const result = computeSettlement(period);
   const labDues = labDuesForPeriod(period);
+  // الحصيلة تُرجع النسبة المُطبَّقة (نسبة الطبيب أو البديل القديم من الإعدادات)،
+  // فلا تقول إن كانت نسبة الطبيب نفسه فارغة. نقرأ السجل مباشرةً لنعرف من
+  // يحتاج أن تُحدَّد نسبته. [§18]
+  const pctUnset = new Set(
+    listDoctors()
+      .filter((d) => d.commissionPct == null)
+      .map((d) => d.id),
+  );
 
   const prev = shiftPeriod(period, -1);
   const next = shiftPeriod(period, 1);
@@ -102,12 +110,20 @@ export default async function DoctorsPage({
                     {d.doctorName}
                   </Link>
                   <div className="flex items-center gap-2">
-                    <span className="text-muted-foreground text-sm">
-                      النسبة{" "}
-                      <span className="text-foreground font-semibold tabular-nums">
-                        {d.commissionPct}%
+                    {/* نسبة لم تُحدَّد تُقال بالكلمات لا برقم لم يختره أحد —
+                        إلا في شهر مُقفل، حيث الرقم المُجمَّد هو الحقيقة. */}
+                    {pctUnset.has(d.doctorId) && d.status !== "closed" ? (
+                      <Badge variant="outline" className="font-normal">
+                        النسبة لم تُحدَّد
+                      </Badge>
+                    ) : (
+                      <span className="text-muted-foreground text-sm">
+                        النسبة{" "}
+                        <span className="text-foreground font-semibold tabular-nums">
+                          {d.commissionPct}%
+                        </span>
                       </span>
-                    </span>
+                    )}
                     {d.isOwner ? <Badge variant="secondary">المالك</Badge> : null}
                     {/* ⚠️ المالك ما ينحذف من هنا إطلاقاً: حذفه يقطع كل بوابات
                         `isOwner` بالتطبيق (12 موضع) ويترك العيادة بلا صاحب

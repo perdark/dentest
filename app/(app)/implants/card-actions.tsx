@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState, useCallback, useRef, useState } from "react";
-import { Pencil, Plus } from "lucide-react";
+import { Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,15 +21,15 @@ import { FormError } from "@/components/forms/form-error";
 import { formatIQD, parseAmount } from "@/lib/format";
 import { MoneySummary } from "@/components/forms/money-summary";
 import { CASE_STATUS_LABELS } from "@/lib/strings";
-import {
-  updateImplantCard,
-  addImplantSession,
-  type ImplantFormState,
-} from "@/lib/actions/implants";
-import { EARLIEST_RECORD_DATE } from "@/lib/dates";
+import { updateImplantCard, type ImplantFormState } from "@/lib/actions/implants";
+import { PayDialog } from "../debts/pay-dialog";
 
 type CardData = {
   caseId: number;
+  /**
+   * عنوان المريض من ملفّه (وعنوان البطاقة القديم فقط إن لم يكن للملف عنوان).
+   * التعديل من هنا يكتب في ملف المريض — عنوان واحد لا عنوانان. [2026-09-27]
+   */
   address: string | null;
   labCost: number;
   listPrice: number;
@@ -38,24 +38,42 @@ type CardData = {
   notes: string | null;
   /** المدفوع حتى الآن — يُقرأ للسطر الحيّ فقط، والحساب المعتمد على الخادم. */
   paid: number;
+  /** المتبقي — للسطر الحيّ في حوار الدفعة فقط. */
+  remaining: number;
+  patientName: string;
 };
 
+/**
+ * «إضافة دفعة» هنا هو الحوار نفسه الذي في «الديون» وملف المريض. كانت للبطاقة
+ * نافذة «إضافة جلسة» خاصة بها: فيها ملاحظة وليس فيها استرجاع، والحواران
+ * الآخران بالعكس — ثلاثة طرق لإضافة المال نفسه بثلاثة أشكال. [2026-09-27]
+ *
+ * `showLabCost`: «كلفة المختبر» لا تدخل أي رقم إلا حين يكون «خصم المختبر من
+ * حصة الطبيب» مفعّلاً في الإعدادات، فتُخفى وإلا — والقيمة المحفوظة لا تُمسّ.
+ */
 export function CardActions({
   card,
   today,
+  showLabCost,
 }: {
   card: CardData;
   today: string;
+  showLabCost: boolean;
 }) {
   return (
     <div className="flex flex-wrap gap-2">
-      <EditDialog card={card} />
-      <SessionDialog caseId={card.caseId} paid={card.paid} today={today} />
+      <EditDialog card={card} showLabCost={showLabCost} />
+      <PayDialog
+        caseId={card.caseId}
+        patientName={card.patientName}
+        remaining={card.remaining}
+        today={today}
+      />
     </div>
   );
 }
 
-function EditDialog({ card }: { card: CardData }) {
+function EditDialog({ card, showLabCost }: { card: CardData; showLabCost: boolean }) {
   const [open, setOpen] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
   const [state, formAction] = useActionState<ImplantFormState, FormData>(
@@ -108,6 +126,7 @@ function EditDialog({ card }: { card: CardData }) {
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-1.5 sm:col-span-2">
               <Label htmlFor="ed-address">العنوان</Label>
+              {/* يُحفظ في ملف المريض، فيظهر هناك وعلى كل بطاقاته. */}
               <Input
                 id="ed-address"
                 name="address"
@@ -163,16 +182,20 @@ function EditDialog({ card }: { card: CardData }) {
               />
             </div>
 
-            <div className="space-y-1.5">
-              <Label htmlFor="ed-labCost">كلفة المختبر (د.ع)</Label>
-              <Input
-                id="ed-labCost"
-                name="labCost"
-                inputMode="numeric"
-                defaultValue={String(card.labCost)}
-                className="h-11 text-base tabular-nums"
-              />
-            </div>
+            {/* الحقل الغائب لا يُرسَل، والخادم لا يلمس الكلفة المحفوظة حين
+                لا يجدها — إخفاؤه لا يصفّرها. */}
+            {showLabCost ? (
+              <div className="space-y-1.5">
+                <Label htmlFor="ed-labCost">كلفة المختبر (د.ع)</Label>
+                <Input
+                  id="ed-labCost"
+                  name="labCost"
+                  inputMode="numeric"
+                  defaultValue={String(card.labCost)}
+                  className="h-11 text-base tabular-nums"
+                />
+              </div>
+            ) : null}
 
             <div className="space-y-1.5">
               <Label htmlFor="ed-status">الحالة</Label>
@@ -201,123 +224,6 @@ function EditDialog({ card }: { card: CardData }) {
               إلغاء
             </Button>
             <SubmitButton className="h-11">حفظ التعديلات</SubmitButton>
-          </div>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function SessionDialog({
-  caseId,
-  paid,
-  today,
-}: {
-  caseId: number;
-  paid: number;
-  today: string;
-}) {
-  const [open, setOpen] = useState(false);
-  const [amount, setAmount] = useState("");
-  const formRef = useRef<HTMLFormElement>(null);
-  const [state, formAction] = useActionState<ImplantFormState, FormData>(
-    addImplantSession,
-    {},
-  );
-
-  useActionToast(
-    state,
-    "تم حفظ الجلسة بنجاح",
-    useCallback(() => {
-      setOpen(false);
-      formRef.current?.reset();
-      setAmount("");
-    }, []),
-  );
-
-  // الإغلاق بلا حفظ يمسح المبلغ أيضاً: مبلغ جلسة متروك في الحقل يُقرأ عند
-  // الفتح التالي كأنه مبلغ الجلسة الجديدة.
-  function handleOpenChange(next: boolean) {
-    setOpen(next);
-    if (!next) setAmount("");
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger
-        render={
-          <Button className="h-11">
-            <Plus className="size-4" />
-            إضافة جلسة
-          </Button>
-        }
-      />
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>إضافة جلسة (دفعة)</DialogTitle>
-          <DialogDescription>
-            تُحتسب الجلسة للطبيب صاحب البطاقة.
-          </DialogDescription>
-        </DialogHeader>
-
-        <form ref={formRef} action={formAction} className="space-y-3">
-          <input type="hidden" name="caseId" value={caseId} />
-
-          <div className="space-y-1.5">
-            <Label htmlFor="ss-amount">المبلغ (د.ع)</Label>
-            <Input
-              id="ss-amount"
-              name="amount"
-              inputMode="numeric"
-              placeholder="0"
-              required
-              className="h-11 text-base tabular-nums"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-            />
-            {parseAmount(amount) !== 0 ? (
-              <MoneySummary
-                figures={[
-                  {
-                    label: "مجموع المدفوع بعد هذه الجلسة",
-                    amount: paid + parseAmount(amount),
-                    emphasis: true,
-                  },
-                ]}
-              />
-            ) : null}
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="ss-date">التاريخ</Label>
-            <Input
-              id="ss-date"
-              name="date"
-              type="date"
-              defaultValue={today}
-              min={EARLIEST_RECORD_DATE}
-              max={today}
-              className="h-11"
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="ss-note">ملاحظة (اختياري)</Label>
-            <Input id="ss-note" name="note" autoComplete="off" className="h-11" />
-          </div>
-
-          <FormError>{state.error}</FormError>
-
-          <div className="flex justify-end gap-2 pt-1">
-            <Button
-              type="button"
-              variant="outline"
-              className="h-11"
-              onClick={() => handleOpenChange(false)}
-            >
-              إلغاء
-            </Button>
-            <SubmitButton className="h-11">حفظ الجلسة</SubmitButton>
           </div>
         </form>
       </DialogContent>

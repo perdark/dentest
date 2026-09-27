@@ -3,12 +3,8 @@
 import { useActionState, useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { AlertTriangle, CircleCheckBig, Lock, Unlock } from "lucide-react";
-import type { SettlementResult, DoctorSettlement } from "@/lib/settlement";
-import {
-  calculateDoctorPayout,
-  normalizeCommissionPct,
-  payoutShortfall,
-} from "@/lib/settlement-math";
+import Link from "next/link";
+import type { SettlementResult } from "@/lib/settlement";
 import { formatIQD } from "@/lib/format";
 import { formatPeriodAr, EARLIEST_RECORD_DATE } from "@/lib/dates";
 import { SETTLEMENT_STATUS_LABELS } from "@/lib/strings";
@@ -89,45 +85,21 @@ export function SettlementTable({
   period: string;
   today: string;
 }) {
-  // النِّسَب القابلة للتحرير — للمعاينة الحيّة فقط؛ الحساب النهائي يجري على الخادم.
-  const [pcts, setPcts] = useState<Record<number, string>>(() => {
-    const init: Record<number, string> = {};
-    for (const d of result.doctors) init[d.doctorId] = String(d.commissionPct);
-    return init;
-  });
-
   // حالة فتح نافذة تأكيد الإقفال (محكومة).
   const [closeOpen, setCloseOpen] = useState(false);
   const closeAction = useMonthAction(closeMonth, "تم إقفال الشهر");
   const reopenAction = useMonthAction(reopenMonth, "تمت إعادة فتح الشهر");
 
-  // الحقل الفارغ يعني «غير محدّدة» فيرجع إلى نسبة الطبيب — وليس صفراً. [A5]
-  function formulaFor(d: DoctorSettlement) {
-    return {
-      collectedTotal: d.collectedTotal,
-      labCost: d.labCost,
-      commissionPct: normalizeCommissionPct(pcts[d.doctorId], d.commissionPct),
-      labDeductedPerDoctor: result.labDeductedPerDoctor,
-      pctAppliedAfterLab: result.pctAppliedAfterLab,
-    };
-  }
-
-  function payoutFor(d: DoctorSettlement): number {
-    if (d.status === "closed") return d.payout; // مُجمّد بعد الإقفال
-    return calculateDoctorPayout(formulaFor(d));
-  }
-
-  function shortfallFor(d: DoctorSettlement): number {
-    if (d.status === "closed") return d.shortfall;
-    return payoutShortfall(formulaFor(d));
-  }
-
+  // ⚠️ النسبة لم تعد تُحرَّر هنا (2026-09-27): كان خانة «النسبة %» تُغيّر حصة
+  // الشهر وحده دون نسبة الطبيب، فصار للطبيب رقمان ولا يُعرف أيّهما يسري الشهر
+  // القادم. الحصة والنقص يأتيان كما حسبهما الخادم — مُجمَّدين للشهر المُقفل،
+  // وحيّين لغيره. النسبة تُعدَّل من شاشة «الأطباء». [§18]
   const sumImplant = result.doctors.reduce((a, d) => a + d.collectedImplant, 0);
   const sumOrtho = result.doctors.reduce((a, d) => a + d.collectedOrtho, 0);
   const sumNormal = result.doctors.reduce((a, d) => a + d.collectedNormal, 0);
   const sumAccrued = result.doctors.reduce((a, d) => a + d.accruedTotal, 0);
   const totalCollected = result.totalCollected;
-  const liveTotalPayout = result.doctors.reduce((a, d) => a + payoutFor(d), 0);
+  const liveTotalPayout = result.doctors.reduce((a, d) => a + d.payout, 0);
   // دخل الأشعة يدخل الصافي كاملاً: لم تُقتطع منه حصة لأي طبيب. [D9]
   const clinicNet =
     totalCollected + result.xrayIncome - liveTotalPayout - result.monthExpenses;
@@ -140,12 +112,12 @@ export function SettlementTable({
   // من تجاوزت كلفة مختبره حصته — فرق يُسوّى بالورقة والقلم، فيُرفع فوق الجدول
   // بدل أن يبقى سطراً صغيراً داخل خانة. [عرض فقط]
   const shortfalls = result.doctors
-    .map((d) => ({ id: d.doctorId, name: d.doctorName, amount: shortfallFor(d) }))
+    .map((d) => ({ id: d.doctorId, name: d.doctorName, amount: d.shortfall }))
     .filter((s) => s.amount > 0);
 
   return (
     <div className="flex flex-col gap-4">
-      {/* النموذج الذي يحمل النِّسَب — يُرسَل إلى closeMonth عند تأكيد الإقفال. */}
+      {/* نموذج الإقفال — يحمل الشهر وحده؛ الخادم يحسب النِّسَب والحصص ويُجمّدها. */}
       <form id={CLOSE_FORM_ID} action={closeAction} className="flex flex-col gap-4">
         <input type="hidden" name="period" value={period} />
 
@@ -209,7 +181,6 @@ export function SettlementTable({
                   </TableRow>
                 ) : (
                   result.doctors.map((d) => {
-                    const closed = d.status === "closed";
                     return (
                       <TableRow key={d.doctorId}>
                         <TableCell className="font-medium">
@@ -237,45 +208,25 @@ export function SettlementTable({
                           {formatIQD(d.accruedTotal)}
                         </TableCell>
                         <TableCell className="text-center">
-                          {closed ? (
-                            <span className="text-base font-semibold tabular-nums">
-                              {d.commissionPct}%
-                            </span>
-                          ) : (
-                            <Input
-                              type="number"
-                              name={`pct_${d.doctorId}`}
-                              value={pcts[d.doctorId] ?? ""}
-                              onChange={(e) =>
-                                setPcts((p) => ({
-                                  ...p,
-                                  [d.doctorId]: e.target.value,
-                                }))
-                              }
-                              inputMode="decimal"
-                              min={0}
-                              max={100}
-                              step={1}
-                              aria-label={`نسبة ${d.doctorName}`}
-                              className="mx-auto h-11 w-16 text-center tabular-nums"
-                            />
-                          )}
+                          <span className="text-base font-semibold tabular-nums">
+                            {d.commissionPct}%
+                          </span>
                         </TableCell>
                         <TableCell
                           className={cn(PAYOUT_COL, "money text-end align-top")}
                         >
                           <span className="text-base font-bold">
-                            {formatIQD(payoutFor(d))}
+                            {formatIQD(d.payout)}
                           </span>
                           {/* نقص المختبر مال يُسوّى بيد الموظف خارج البرنامج —
                               يُقرأ بحجم كامل مع أيقونة، لا بأصغر خط في الصفحة. */}
-                          {shortfallFor(d) > 0 ? (
+                          {d.shortfall > 0 ? (
                             <span className="text-destructive border-destructive/40 bg-destructive/10 ms-auto mt-1.5 flex w-fit max-w-60 items-start gap-1.5 rounded-md border px-2 py-1 text-start text-sm font-medium whitespace-normal">
                               <AlertTriangle className="mt-0.5 size-4 shrink-0" />
                               <span>
                                 المختبر يزيد{" "}
                                 <span className="money font-bold">
-                                  {formatIQD(shortfallFor(d))}
+                                  {formatIQD(d.shortfall)}
                                 </span>{" "}
                                 عن الحصة — يُسوّى يدوياً
                               </span>
@@ -319,6 +270,18 @@ export function SettlementTable({
             </Table>
           </CardContent>
         </Card>
+
+        {/* من يريد تغيير نسبة وجدها هنا — السطر يدلّه على مكانها الوحيد. */}
+        <p className="text-muted-foreground text-sm">
+          النسبة تُعدَّل من{" "}
+          <Link
+            href="/doctors"
+            className="text-primary inline-flex min-h-11 items-center font-medium underline-offset-4 hover:underline"
+          >
+            شاشة «الأطباء»
+          </Link>
+          .
+        </p>
 
         {canClose ? (
           <div className="flex flex-wrap items-center justify-end gap-2">
@@ -365,7 +328,7 @@ export function SettlementTable({
         ) : null}
       </form>
 
-      {/* صافي العيادة — يُعاد حسابه حيّاً مع تعديل النِّسَب. */}
+      {/* صافي العيادة — من الحصص كما حسبها الخادم. */}
       <Card size="sm" className="bg-primary/5 ring-primary/30">
         <CardHeader>
           <CardTitle>صافي العيادة</CardTitle>

@@ -6,7 +6,9 @@ import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { backupsDir, databasePath, pendingRestorePath } from "@/lib/paths";
-import { updateSettings, updateDoctor } from "@/lib/mutations";
+import { updateSettings } from "@/lib/mutations";
+import { resetTours } from "@/lib/tour-state";
+import { hasAnyRecords } from "@/lib/queries";
 import { getSettings } from "@/lib/server-utils";
 import { verifyPin, hashPin } from "@/lib/crypto";
 import { parseAmount } from "@/lib/format";
@@ -53,25 +55,19 @@ export async function updateGeneral(
 }
 
 // ── إعدادات الحساب (أرقام غير مؤكدة) ─────────────────────────────────────────
+// ⚠️ لا «نسبة افتراضية» ولا «طريقة رواتب» هنا بعد 2026-09-27: النسبة تُحدَّد
+// لكل طبيب من شاشة «الأطباء» (إلزامية عند الإضافة والتعديل)، وطريقة الرواتب
+// لم تدخل أي حساب قط. العمودان باقيان في قاعدة البيانات — `default_commission_pct`
+// ما زال بديل الطبيب القديم الذي لم تُحدَّد نسبته في lib/settlement.ts. [§18]
 export async function updateAccounting(
   _prev: SettingsState,
   formData: FormData,
 ): Promise<SettingsState> {
   await requireAuth();
   const parsed = z
-    .object({
-      cashReserveThreshold: z.string(),
-      defaultCommissionPct: z.coerce
-        .number()
-        .int()
-        .min(0, "النسبة بين 0 و 100")
-        .max(100, "النسبة بين 0 و 100"),
-      staffSalaryMode: z.string().trim().min(1, "أدخل طريقة احتساب الرواتب"),
-    })
+    .object({ cashReserveThreshold: z.string() })
     .safeParse({
       cashReserveThreshold: String(formData.get("cashReserveThreshold") ?? ""),
-      defaultCommissionPct: String(formData.get("defaultCommissionPct") ?? "0"),
-      staffSalaryMode: String(formData.get("staffSalaryMode") ?? ""),
     });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "تحقّق من البيانات المُدخلة" };
@@ -84,49 +80,38 @@ export async function updateAccounting(
   };
   updateSettings({
     cashReserveThreshold: Math.max(0, parseAmount(parsed.data.cashReserveThreshold)),
-    defaultCommissionPct: parsed.data.defaultCommissionPct,
     labDeductedPerDoctor: switchOn("labDeductedPerDoctor"),
     pctAppliedAfterLab: switchOn("pctAppliedAfterLab"),
-    staffSalaryMode: parsed.data.staffSalaryMode,
   });
   revalidateSettings();
   return { ok: true };
 }
 
-// ── نِسَب الأطباء: نسبة طبيب واحد لكل نموذج ───────────────────────────────────
-export async function updateDoctorPct(
-  _prev: SettingsState,
-  formData: FormData,
-): Promise<SettingsState> {
+// ── الشرح التعريفي ───────────────────────────────────────────────────────────
+export type TutorialState = { ok: true; autoStart: boolean } | { ok: false; error: string };
+
+/**
+ * «إعادة تشغيل الشرح»: يمسح الجولات المُشاهَدة من قاعدة البيانات.
+ *
+ * 🔴 كان الزر يمسح `localStorage` وحده، والجولات لم تعد هناك منذ نُقلت إلى
+ * `settings.tours_seen` (lib/tour-state.ts) — فلم يكن يُعيد شيئاً.
+ *
+ * `autoStart` يقول للشاشة هل ستفتح الجولة وحدها: الـlayout لا يعرضها دون طلب
+ * إلا على نظام بلا سجلات أو ببيانات تدريب (app/(app)/layout.tsx). في عيادة
+ * تعمل يبقى الشرح على زر «؟»، والرسالة يجب أن تقول ذلك لا أن تَعِد بجولة.
+ */
+export async function restartTutorial(): Promise<TutorialState> {
   await requireAuth();
-  const parsed = z
-    .object({
-      doctorId: z.coerce.number().int().positive(),
-      commissionPct: z.string(),
-    })
-    .safeParse({
-      doctorId: formData.get("doctorId"),
-      commissionPct: String(formData.get("commissionPct") ?? ""),
-    });
-  if (!parsed.success) return { error: "طبيب غير صالح" };
-
-  const raw = parsed.data.commissionPct.trim();
-  // Empty = UNCONFIRMED → store NULL so the «غير مؤكد» badge returns. [C1]
-  let commissionPct: number | null = null;
-  if (raw !== "") {
-    const n = Number(raw.replace(/[٬,\s]/g, ""));
-    if (!Number.isFinite(n)) return { error: "أدخل نسبة رقمية بين 0 و 100" };
-    commissionPct = Math.max(0, Math.min(100, Math.round(n)));
+  try {
+    await resetTours();
+  } catch (e) {
+    console.error("restartTutorial failed:", e);
+    return { ok: false, error: "لم يتغيّر شيء — أعد المحاولة." };
   }
-
-  // طبيب غير مُفعَّل يختفي من قوائم الاختيار لكن تبقى حالاته وحصصه كما هي. [B5]
-  const isActive = formData.get("isActive") != null;
-
-  updateDoctor(parsed.data.doctorId, { commissionPct, isActive });
-  revalidateSettings();
-  revalidatePath("/daily");
-  revalidatePath("/appointments");
-  return { ok: true };
+  // الـlayout هو من يقرأ `toursSeen` ويمرّره للجولة — يُعاد رسمه كلّه.
+  revalidatePath("/", "layout");
+  const autoStart = getSettings().demoDataAt != null || !hasAnyRecords();
+  return { ok: true, autoStart };
 }
 
 // ── رمز الدخول ───────────────────────────────────────────────────────────────

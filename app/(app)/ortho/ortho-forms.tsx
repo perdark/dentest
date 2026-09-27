@@ -192,6 +192,7 @@ export function NewOrthoCaseDialog({
                 type="date"
                 className="h-11"
               />
+              <p className="text-muted-foreground text-sm">يُحجز تلقائياً في المواعيد.</p>
             </div>
           </div>
 

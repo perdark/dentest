@@ -41,7 +41,9 @@ export function OrthoMetaForm({
           defaultValue={nextAppointment ?? ""}
           className="h-11"
         />
-        <p className="text-muted-foreground text-sm">اتركه فارغًا لإلغاء الموعد.</p>
+        <p className="text-muted-foreground text-sm">
+          يُحجز تلقائياً في المواعيد. اتركه فارغًا لإلغاء الموعد.
+        </p>
       </div>
 
       <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-lg border border-input px-3">

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowRight, Grid2x2, HeartPulse, MapPin, Phone, PhoneOff, Stethoscope } from "lucide-react";
+import { ArrowRight, Grid2x2, HeartPulse, MapPin, Phone, PhoneOff, StickyNote, Stethoscope } from "lucide-react";
 import {
   patientById,
   casesForPatient,
@@ -8,10 +8,20 @@ import {
   teethForCase,
   patientToothHistory,
   normalTreatmentSuggestions,
+  paymentsForPatient,
+  patientDeletionImpact,
+  caseRaw,
 } from "@/lib/queries";
 import { formatIQD } from "@/lib/format";
 import { formatDateShortY, todayISO } from "@/lib/dates";
-import { CASE_STATUS_LABELS, ORTHO_BUCKET, medicalFlagsLine } from "@/lib/strings";
+import {
+  CASE_STATUS_LABELS,
+  ORTHO_BUCKET,
+  PAYMENT_KIND_LABELS,
+  XRAY_BUCKET,
+  medicalFlagsLine,
+} from "@/lib/strings";
+import { cn } from "@/lib/utils";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -28,6 +38,12 @@ import { PatientToothChart } from "@/components/tooth-chart/patient-tooth-chart"
 import { PatientForm } from "../patient-form";
 import { PayDialog } from "../../debts/pay-dialog";
 import { AddTreatmentDialog } from "./add-treatment-dialog";
+import { EditCaseDialog } from "./edit-case-dialog";
+import { ConfirmDeleteDialog } from "@/components/forms/confirm-delete-dialog";
+import { EditPaymentDialog } from "@/components/forms/edit-payment-dialog";
+import { VoidPaymentButton } from "@/components/forms/void-payment-button";
+import { deletePatientAction } from "@/lib/actions/patients";
+import { deleteCaseAction } from "@/lib/actions/cases";
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline"> = {
   open: "default",
@@ -95,6 +111,30 @@ export default async function PatientProfilePage({
   );
   const today = todayISO();
 
+  // تصحيح ما أُدخل بالخطأ: الدفعات كلها في جدول واحد، وما سيُحذف مع المريض أو
+  // مع الحالة يُعدّ هنا ليُقال صراحةً في نافذة التأكيد.
+  const patientPayments = paymentsForPatient(patient.id);
+  const impact = patientDeletionImpact(patient.id);
+  const paymentsByCase = new Map<number, { count: number; total: number }>();
+  for (const p of patientPayments) {
+    const agg = paymentsByCase.get(p.caseId) ?? { count: 0, total: 0 };
+    paymentsByCase.set(p.caseId, { count: agg.count + 1, total: agg.total + p.amount });
+  }
+  // الزراعة والتقويم والأشعة تُعدَّل من شاشاتها؛ العلاج العادي يُعدَّل هنا.
+  const isOrdinary = (c: (typeof cases)[number]) =>
+    !c.isImplant &&
+    !c.isOrtho &&
+    c.bucket !== "implant" &&
+    c.bucket !== ORTHO_BUCKET &&
+    c.bucket !== XRAY_BUCKET;
+  // الطبيب الحالي للحالة يبقى في القائمة حتى لو أُوقف، كي لا يمسحه حفظٌ لم يقصده.
+  const allDoctors = listDoctors();
+  const editDoctorsFor = (doctorId: number) =>
+    allDoctors
+      .filter((d) => d.isActive || d.id === doctorId)
+      .map((d) => ({ id: d.id, name: d.name }));
+  const treatmentSuggestions = normalTreatmentSuggestions();
+
   // التقويم لا رصيد عليه: لا يوجد إجمالي متفق عليه، فالفرق بين الإجمالي
   // المحفوظ والمدفوع ليس ديناً. يُستثنى هنا كما يُستثنى في «الديون» حتى لا
   // يقرأ الموظف رقمين متناقضين عن المريض نفسه. [2026-08-19]
@@ -150,6 +190,14 @@ export default async function PatientProfilePage({
                     {patient.address}
                   </p>
                 ) : null}
+                {/* ملاحظات الملف تُحفظ من «تعديل» وكانت لا تظهر في أي مكان —
+                    يكتبها الموظف ثم لا يجدها. */}
+                {patient.notes ? (
+                  <p className="flex items-start gap-1.5">
+                    <StickyNote className="text-muted-foreground mt-0.5 size-4 shrink-0" />
+                    <span className="min-w-0 whitespace-pre-line break-words">{patient.notes}</span>
+                  </p>
+                ) : null}
               </div>
 
               {/* تحذير الحالة الصحية — أعلى الملف، قبل أي رقم أو حالة. */}
@@ -166,7 +214,44 @@ export default async function PatientProfilePage({
                 </Alert>
               ) : null}
             </div>
-            <PatientForm mode="edit" patient={patient} doctors={doctorOptions} />
+            <div className="flex shrink-0 flex-col items-end gap-2">
+              <PatientForm mode="edit" patient={patient} doctors={doctorOptions} />
+              <ConfirmDeleteDialog
+                action={deletePatientAction}
+                fields={{ id: patient.id }}
+                title={`حذف المريض ${patient.fullName}`}
+                ariaLabel={`حذف المريض ${patient.fullName}`}
+                triggerText="حذف"
+                successMessage="تم حذف المريض وكل سجلاته"
+                description={
+                  <>
+                    <p>
+                      سيُحذف المريض <strong className="text-foreground">{patient.fullName}</strong>{" "}
+                      نهائياً، ومعه كل شيء مسجّل عليه:
+                    </p>
+                    <ul className="text-foreground list-disc space-y-1 ps-5">
+                      <li>
+                        <span className="tabular-nums">{impact.cases}</span> علاج/حالة
+                      </li>
+                      <li>
+                        <span className="tabular-nums">{impact.payments}</span> دفعة
+                        {impact.payments > 0 ? (
+                          <>
+                            {" "}بمجموع <span className="money">{formatIQD(impact.paymentsTotal)}</span>
+                            {" "}— ستُطرح من تحصيل أشهرها ومن النقد المتوفر
+                          </>
+                        ) : null}
+                      </li>
+                      <li>
+                        <span className="tabular-nums">{impact.appointments}</span> موعد
+                      </li>
+                    </ul>
+                    <p className="text-destructive font-medium">هل أنت متأكد؟</p>
+                    <p>يبقى نص كل ما حُذف في «سجل التعديلات».</p>
+                  </>
+                }
+              />
+            </div>
           </CardContent>
         </Card>
 
@@ -201,7 +286,7 @@ export default async function PatientProfilePage({
             الجديدة أو القديمة من الدفتر.
           </div>
         ) : (
-          <div className="overflow-hidden rounded-xl ring-1 ring-foreground/10">
+          <div data-tour="patient-cases" className="overflow-hidden rounded-xl ring-1 ring-foreground/10">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -214,17 +299,21 @@ export default async function PatientProfilePage({
                   <TableHead>الحالة</TableHead>
                   <TableHead className="text-end">المخطط</TableHead>
                   <TableHead>
-                    <span className="sr-only">دفعة</span>
+                    <span className="sr-only">إجراءات</span>
                   </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {cases.map((c) => {
+                  // كل حالة زراعة أو تقويم تفتح صفحتها هي، لا قائمة الشاشة كلها.
                   const href = c.isImplant
                     ? `/implants/${c.id}`
-                    : c.bucket === "ortho"
-                      ? "/ortho"
+                    : c.bucket === ORTHO_BUCKET
+                      ? `/ortho/${c.id}`
                       : null;
+                  // السجل الكامل مرة واحدة لكل حالة: ملاحظاتها تُعرض تحت اسم
+                  // العلاج، وأسعارها تملأ نافذة «تعديل» للعلاج العادي.
+                  const raw = caseRaw(c.id);
                   return (
                     <TableRow key={c.id}>
                       <TableCell>
@@ -238,6 +327,15 @@ export default async function PatientProfilePage({
                         ) : (
                           <span className="font-medium">{c.treatment}</span>
                         )}
+                        {/* ملاحظة الحالة كانت لا تُرى إلا بفتح «تعديل». */}
+                        {raw?.notes ? (
+                          <p
+                            className="text-muted-foreground max-w-56 truncate text-xs"
+                            title={raw.notes}
+                          >
+                            {raw.notes}
+                          </p>
+                        ) : null}
                       </TableCell>
                       <TableCell className="hidden md:table-cell">{c.doctorName}</TableCell>
                       <TableCell className="hidden whitespace-nowrap sm:table-cell">
@@ -286,14 +384,61 @@ export default async function PatientProfilePage({
                       {/* جلسة على حالة مفتوحة تُضاف من هنا بتاريخها، كما من
                           «الديون». التقويم يُسدَّد من شاشته. */}
                       <TableCell className="text-end">
-                        {c.status === "open" && c.bucket !== ORTHO_BUCKET && c.remaining > 0 ? (
-                          <PayDialog
-                            caseId={c.id}
-                            patientName={`${patient.fullName} — ${c.treatment}`}
-                            remaining={c.remaining}
-                            today={today}
+                        <div className="flex items-center justify-end gap-1">
+                          {c.status === "open" && c.bucket !== ORTHO_BUCKET && c.remaining > 0 ? (
+                            <PayDialog
+                              caseId={c.id}
+                              patientName={`${patient.fullName} — ${c.treatment}`}
+                              remaining={c.remaining}
+                              today={today}
+                            />
+                          ) : null}
+                          {isOrdinary(c) && raw ? (
+                            <EditCaseDialog
+                              caseId={c.id}
+                              treatment={c.treatment}
+                              doctorId={c.doctorId}
+                              openedDate={c.openedDate}
+                              listPrice={raw.listPrice}
+                              discount={raw.discount}
+                              totalPrice={raw.totalPrice}
+                              notes={raw.notes}
+                              paid={c.paid}
+                              doctors={editDoctorsFor(c.doctorId)}
+                              treatments={treatmentSuggestions}
+                              today={today}
+                            />
+                          ) : null}
+                          <ConfirmDeleteDialog
+                            action={deleteCaseAction}
+                            fields={{ caseId: c.id }}
+                            title={`حذف ${c.treatment}`}
+                            ariaLabel={`حذف ${c.treatment}`}
+                            successMessage="تم حذف العلاج"
+                            description={(() => {
+                              const agg = paymentsByCase.get(c.id);
+                              return (
+                                <>
+                                  <p>
+                                    سيُحذف علاج «{c.treatment}» الخاص بـ {patient.fullName} نهائياً
+                                    {c.isImplant && c.implantCardNo != null
+                                      ? ` (بطاقة زراعة #${c.implantCardNo})`
+                                      : ""}
+                                    .
+                                  </p>
+                                  {agg ? (
+                                    <p className="text-foreground">
+                                      ومعه <span className="tabular-nums">{agg.count}</span> دفعة
+                                      بمجموع <span className="money">{formatIQD(agg.total)}</span> —
+                                      ستُطرح من تحصيل أشهرها ومن النقد المتوفر.
+                                    </p>
+                                  ) : null}
+                                  <p className="text-destructive font-medium">هل أنت متأكد؟</p>
+                                </>
+                              );
+                            })()}
                           />
-                        ) : null}
+                        </div>
                       </TableCell>
                     </TableRow>
                   );
@@ -309,6 +454,71 @@ export default async function PatientProfilePage({
           <span className="money text-2xl font-bold">{formatIQD(totalRemaining)}</span>
         </div>
       </div>
+
+      {/* الدفعات — كل ما قُبض من المريض، ويُصحَّح أو يُحذف من هنا. */}
+      {patientPayments.length > 0 ? (
+        <div className="space-y-2">
+          <h2 className="text-lg font-semibold">الدفعات</h2>
+          <div className="overflow-hidden rounded-xl ring-1 ring-foreground/10">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>التاريخ</TableHead>
+                  <TableHead>العلاج</TableHead>
+                  <TableHead className="hidden sm:table-cell">النوع</TableHead>
+                  <TableHead className="hidden md:table-cell">ملاحظة</TableHead>
+                  <TableHead className="text-end">المبلغ</TableHead>
+                  <TableHead>
+                    <span className="sr-only">إجراءات</span>
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {patientPayments.map((p) => (
+                  <TableRow key={p.id}>
+                    <TableCell className="whitespace-nowrap">
+                      <span dir="ltr" className="tabular-nums">
+                        {formatDateShortY(p.paidDate)}
+                      </span>
+                    </TableCell>
+                    <TableCell>{p.treatment}</TableCell>
+                    <TableCell className="hidden sm:table-cell">
+                      {PAYMENT_KIND_LABELS[p.kind] ?? p.kind}
+                    </TableCell>
+                    <TableCell className="hidden max-w-56 truncate md:table-cell" title={p.note ?? undefined}>
+                      {p.note}
+                    </TableCell>
+                    <TableCell className="text-end">
+                      <span className={cn("money", p.amount < 0 && "text-destructive")}>
+                        {formatIQD(p.amount)}
+                      </span>
+                    </TableCell>
+                    <TableCell className="text-end">
+                      <div className="flex items-center justify-end gap-1">
+                        <EditPaymentDialog
+                          paymentId={p.id}
+                          amount={p.amount}
+                          kind={p.kind}
+                          paidDate={p.paidDate}
+                          note={p.note}
+                          today={today}
+                          patientName={patient.fullName}
+                        />
+                        <VoidPaymentButton
+                          paymentId={p.id}
+                          amount={p.amount}
+                          paidDate={p.paidDate}
+                          patientName={patient.fullName}
+                        />
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

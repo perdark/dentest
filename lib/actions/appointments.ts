@@ -7,8 +7,9 @@ import {
   createAppointment,
   setAppointmentStatus,
   deleteAppointment,
+  updateAppointment,
 } from "@/lib/mutations";
-import { appointmentById } from "@/lib/queries";
+import { appointmentById, patientById } from "@/lib/queries";
 import {
   todayISO,
   isValidISODate,
@@ -28,7 +29,9 @@ function revalidateAppointments() {
 // ── حجز موعد ─────────────────────────────────────────────────────────────────
 // السجل الرئيسي يحمل الاسم والموعد فقط — بلا تفاصيل علاجية، حسب طلب العيادة.
 const bookSchema = z.object({
-  patientName: z.string().trim().min(1, "اسم المراجع مطلوب"),
+  // يُرسَل عند اختيار «مريض مسجّل»: الموعد يُعلَّق على ملفه، ولا يُرسَل اسم ولا هاتف.
+  patientId: z.coerce.number().int().positive().optional(),
+  patientName: z.string().trim().optional().default(""),
   phone: z.string().trim().optional().default(""),
   doctorId: z.string().optional().default(""),
   apptDate: z.string().optional().default(""),
@@ -47,6 +50,12 @@ export async function bookAppointment(
   }
   const d = parsed.data;
 
+  if (d.patientId !== undefined) {
+    if (!patientById(d.patientId)) return { error: "المريض المختار غير موجود" };
+  } else if (!d.patientName) {
+    return { error: "اسم المراجع مطلوب" };
+  }
+
   const apptDate = isValidISODate(d.apptDate) ? d.apptDate : todayISO();
   if (d.apptTime && !isValidTime(d.apptTime)) {
     return { error: "وقت الموعد غير صحيح" };
@@ -60,10 +69,14 @@ export async function bookAppointment(
     doctorId = n;
   }
 
-  const patientId = findOrCreatePatient({
-    fullName: d.patientName,
-    phone: d.phone || null,
-  });
+  // الهاتف الفارغ لا يطابق أحداً، فكل حجز لمراجع قديم بلا هاتف كان يفتح له ملفاً
+  // ثانياً باسمه نفسه ويشطر تاريخه. «مريض مسجّل» يتخطّى البحث بالاسم كلياً.
+  const patientId =
+    d.patientId ??
+    findOrCreatePatient({
+      fullName: d.patientName,
+      phone: d.phone || null,
+    });
 
   createAppointment({
     patientId,
@@ -74,6 +87,7 @@ export async function bookAppointment(
   });
 
   revalidateAppointments();
+  revalidatePath(`/patients/${patientId}`);
   return { ok: true };
 }
 
@@ -111,6 +125,49 @@ export async function removeAppointment(
   if (!parsed.success) return { error: "موعد غير صالح" };
 
   if (!deleteAppointment(parsed.data.id)) {
+    return { error: "لم يتم العثور على الموعد" };
+  }
+
+  revalidateAppointments();
+  return { ok: true };
+}
+
+// ── تعديل موعد ───────────────────────────────────────────────────────────────
+// الموعد بطبيعته في المستقبل، فالتاريخ يُفحص بـ isValidISODate لا isRecordableDate.
+const editSchema = z.object({
+  id: z.coerce.number().int().positive(),
+  doctorId: z.string().optional().default(""),
+  apptDate: z.string().trim(),
+  apptTime: z.string().optional().default(""),
+  note: z.string().trim().max(500).optional().default(""),
+});
+
+export async function editAppointment(
+  _prev: ApptState,
+  formData: FormData,
+): Promise<ApptState> {
+  await requireAuth();
+  const parsed = editSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: "تحقّق من البيانات المُدخلة" };
+  const d = parsed.data;
+
+  if (!isValidISODate(d.apptDate)) return { error: "تاريخ الموعد غير صحيح" };
+  if (d.apptTime && !isValidTime(d.apptTime)) return { error: "وقت الموعد غير صحيح" };
+  let doctorId: number | null = null;
+  if (d.doctorId.trim() !== "") {
+    const n = Number(d.doctorId);
+    if (!Number.isInteger(n) || n <= 0) return { error: "اختر طبيباً صحيحاً" };
+    doctorId = n;
+  }
+
+  if (
+    !updateAppointment(d.id, {
+      doctorId,
+      apptDate: d.apptDate,
+      apptTime: d.apptTime || null,
+      note: d.note || null,
+    })
+  ) {
     return { error: "لم يتم العثور على الموعد" };
   }
 

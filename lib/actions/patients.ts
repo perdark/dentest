@@ -2,9 +2,11 @@
 
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import {
   createPatient as createPatientMutation,
   updatePatient as updatePatientMutation,
+  deletePatientCascade,
   createCaseWithTeeth,
   findOrCreateTreatmentType,
   toothMarkFailureMessage,
@@ -123,6 +125,34 @@ export async function updatePatientAction(
   revalidatePath("/patients");
   revalidatePath(`/patients/${id}`);
   return { ok: true };
+}
+
+// ── حذف مريض مع كل سجلاته ────────────────────────────────────────────────────
+/**
+ * يحذف المريض وحالاته ودفعاته ومواعيده دفعةً واحدة — نافذة التأكيد تعرض ما
+ * سيُحذف قبل الضغط. كل سطر محذوف يبقى في «سجل التعديلات»، وكل شهر مغلق تأثّر
+ * يُعلَّم بحاجة لإعادة الإغلاق. [D4]
+ */
+export async function deletePatientAction(
+  _prev: PatientFormState,
+  formData: FormData,
+): Promise<PatientFormState> {
+  await requireAuth();
+  const parsed = z
+    .object({ id: z.coerce.number().int().positive() })
+    .safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: "مريض غير صالح" };
+
+  if (!deletePatientCascade(parsed.data.id)) {
+    return { error: "لم يتم العثور على المريض؛ ربما حُذف." };
+  }
+
+  for (const path of ["/patients", "/appointments", "/daily", "/debts", "/implants", "/ortho", "/settlement", "/dashboard"]) {
+    revalidatePath(path, "layout");
+  }
+  // الملف المحذوف لم يعد موجوداً: أي إعادة رسم له تُظهر 404، فالخادم ينقل إلى
+  // القائمة مباشرة، ورسالة التأكيد تُعرض هناك («?deleted=1»).
+  redirect("/patients?deleted=1");
 }
 
 // ── البحث عن مريض مسجّل (الدفتر اليومي، الزراعة) ─────────────────────────────

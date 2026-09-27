@@ -33,6 +33,7 @@ const schema = z.object({
   // so an older form that posts no `kind` keeps behaving exactly as it did.
   kind: z.enum(PAYMENT_KINDS).optional().default("session"),
   date: z.string().optional().default(""),
+  note: z.string().optional().default(""),
 });
 
 export async function recordDebtPayment(
@@ -66,6 +67,7 @@ export async function recordDebtPayment(
     amount,
     kind: d.kind,
     paidDate: date,
+    note: d.note.trim() || null,
   });
   if (!result.ok) return { error: paymentFailureMessage(result.reason) };
 
@@ -73,5 +75,7 @@ export async function recordDebtPayment(
   revalidatePath("/daily");
   revalidatePath("/dashboard");
   revalidatePath("/patients/[id]", "page");
+  // الحوار نفسه يُفتح من بطاقة الزراعة أيضاً (بدل «إضافة جلسة» القديم). [2026-09-27]
+  revalidatePath("/implants", "layout");
   return { ok: true };
 }

@@ -9,7 +9,6 @@ import {
   doctorRefCounts,
   addLabEntry,
   deleteLabEntry,
-  findOrCreatePatient,
 } from "@/lib/mutations";
 import { todayISO, isRecordableDate } from "@/lib/dates";
 import { parseAmount } from "@/lib/format";
@@ -29,10 +28,27 @@ function revalidateDoctors(id?: number) {
   revalidatePath("/implants");
 }
 
+// ── النسبة (%) ───────────────────────────────────────────────────────────────
+/**
+ * النسبة إلزامية عند الإضافة والتعديل: عدد صحيح بين 0 و100.
+ *
+ * ⚠️ كانت تُترك فارغة فتسري «النسبة الافتراضية» من الإعدادات بصمت — طبيب يُصرف
+ * له بنسبة لم يختَرها أحد له. الافتراضية أُزيلت من الشاشات (§18)، فالفراغ الآن
+ * يُرفض بجملة واضحة بدل أن يمرّ. «0» نسبة حقيقية (المالك مثلاً)، لا فراغ.
+ */
+const PCT_REQUIRED = "أدخل نسبة الطبيب — عدد صحيح من 0 إلى 100";
+const pctField = z
+  .string({ error: PCT_REQUIRED })
+  .trim()
+  .min(1, PCT_REQUIRED)
+  .transform((v) => v.replace(/[٠-٩]/g, (c) => String(c.charCodeAt(0) - 0x0660)))
+  .refine((v) => /^\d{1,3}$/.test(v) && Number(v) <= 100, PCT_REQUIRED)
+  .transform(Number);
+
 // ── إضافة طبيب ───────────────────────────────────────────────────────────────
 const createSchema = z.object({
   name: z.string().trim().min(1, "اسم الطبيب مطلوب"),
-  commissionPct: z.string().optional().default(""),
+  commissionPct: pctField,
   labName: z.string().trim().optional().default(""),
   doesOrtho: z.string().optional(),
   doesImplants: z.string().optional(),
@@ -50,19 +66,9 @@ export async function addDoctor(
   }
   const d = parsed.data;
 
-  // النسبة تبقى فارغة إن لم تُحدَّد — الافتراضي في الإعدادات يسري عندها.
-  let pct: number | null = null;
-  if (d.commissionPct.trim() !== "") {
-    const n = Number(d.commissionPct);
-    if (!Number.isFinite(n) || n < 0 || n > 100) {
-      return { error: "النسبة يجب أن تكون بين 0 و100" };
-    }
-    pct = Math.round(n);
-  }
-
   const id = createDoctor({
     name: d.name,
-    commissionPct: pct,
+    commissionPct: d.commissionPct,
     doesOrtho: d.doesOrtho === "on",
     doesImplants: d.doesImplants === "on",
     doesNormal: d.doesNormal === "on",
@@ -77,7 +83,7 @@ export async function addDoctor(
 const updateSchema = z.object({
   id: z.coerce.number().int().positive(),
   name: z.string().trim().min(1, "اسم الطبيب مطلوب"),
-  commissionPct: z.string().optional().default(""),
+  commissionPct: pctField,
   labName: z.string().trim().optional().default(""),
   doesOrtho: z.string().optional(),
   doesImplants: z.string().optional(),
@@ -96,18 +102,9 @@ export async function saveDoctor(
   }
   const d = parsed.data;
 
-  let pct: number | null = null;
-  if (d.commissionPct.trim() !== "") {
-    const n = Number(d.commissionPct);
-    if (!Number.isFinite(n) || n < 0 || n > 100) {
-      return { error: "النسبة يجب أن تكون بين 0 و100" };
-    }
-    pct = Math.round(n);
-  }
-
   updateDoctor(d.id, {
     name: d.name,
-    commissionPct: pct,
+    commissionPct: d.commissionPct,
     labName: d.labName || null,
     doesOrtho: d.doesOrtho === "on",
     doesImplants: d.doesImplants === "on",
@@ -179,7 +176,6 @@ const labSchema = z.object({
   amount: z.string(),
   entryDate: z.string().optional().default(""),
   note: z.string().trim().optional().default(""),
-  patientName: z.string().trim().optional().default(""),
 });
 
 export async function addLabEntryAction(
@@ -194,16 +190,16 @@ export async function addLabEntryAction(
   const amount = parseAmount(d.amount);
   if (amount === 0) return { error: "أدخل مبلغاً" };
 
-  // ربط التسجيل بمريض اختياري — كثير من تسجيلات المختبر حساب شهري بلا مريض بعينه.
-  const patientId = d.patientName ? findOrCreatePatient({ fullName: d.patientName }) : null;
-
+  // 🔴 لا حقل «المريض» بعد 2026-09-27: كل اسم يُكتب هنا كان يمرّ على
+  // `findOrCreatePatient` فيفتح ملف مريض فارغاً يظهر في «المرضى» بلا حالة ولا
+  // دفعة. تسجيل المختبر متابعة فقط، والملاحظة تكفي لذكر المريض. عمود
+  // `lab_entries.patient_id` باقٍ للتسجيلات القديمة ولا يُكتب بعد الآن. [§18]
   addLabEntry({
     doctorId: d.doctorId,
     branch: d.branch,
     entryDate: isRecordableDate(d.entryDate) ? d.entryDate : todayISO(),
     amount,
     note: d.note || null,
-    patientId,
   });
 
   revalidateDoctors(d.doctorId);

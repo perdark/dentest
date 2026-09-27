@@ -2,7 +2,8 @@
 
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
-import { deletePayment } from "@/lib/mutations";
+import { deletePayment, updatePayment, paymentEditFailureMessage } from "@/lib/mutations";
+import { parseAmount } from "@/lib/format";
 import { requireAuth } from "@/lib/auth";
 
 export type VoidState = { ok?: boolean; error?: string };
@@ -25,6 +26,11 @@ export async function voidPayment(
   const removed = deletePayment(parsed.data.paymentId);
   if (!removed) return { error: "لم يتم العثور على التسجيل؛ ربما أُلغي مسبقاً." };
 
+  revalidatePaymentScreens();
+  return { ok: true };
+}
+
+function revalidatePaymentScreens() {
   for (const path of [
     "/daily",
     "/debts",
@@ -36,5 +42,38 @@ export async function voidPayment(
   ]) {
     revalidatePath(path, "layout");
   }
+}
+
+// ── تعديل دفعة ───────────────────────────────────────────────────────────────
+const editSchema = z.object({
+  paymentId: z.coerce.number().int().positive(),
+  amount: z.string().trim().min(1, "أدخل المبلغ"),
+  paidDate: z.string().trim(),
+  note: z.string().trim().max(500).optional().default(""),
+});
+
+/**
+ * تصحيح مبلغ دفعة أو تاريخها أو ملاحظتها. النوع والطبيب لا يُعدَّلان هنا: الطبيب
+ * يتبع الحالة، والنوع الخاطئ يُلغى ويُعاد إدخاله. القيود نفسها التي تحكم إضافة
+ * دفعة جديدة تُطبَّق في طبقة البيانات.
+ */
+export async function updatePaymentAction(
+  _prev: VoidState,
+  formData: FormData,
+): Promise<VoidState> {
+  await requireAuth();
+  const parsed = editSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "تحقّق من البيانات المُدخلة" };
+  }
+  const d = parsed.data;
+  const result = updatePayment(d.paymentId, {
+    amount: parseAmount(d.amount),
+    paidDate: d.paidDate,
+    note: d.note || null,
+  });
+  if (!result.ok) return { error: paymentEditFailureMessage(result.reason) };
+
+  revalidatePaymentScreens();
   return { ok: true };
 }

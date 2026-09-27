@@ -4,9 +4,24 @@ import { computeSettlement } from "@/lib/settlement";
 import { labDuesTotal } from "@/lib/queries";
 import { formatIQD } from "@/lib/format";
 import { currentPeriod, formatPeriodAr, shiftPeriod, todayISO } from "@/lib/dates";
+import { getSettings } from "@/lib/server-utils";
 import { Button } from "@/components/ui/button";
 import { SettlementTable } from "./settlement-table";
 
+/**
+ * The rule the table was computed with, in words — one sentence per branch of
+ * `rawDoctorPayout` (lib/settlement-math.ts), so the two cannot drift apart
+ * silently. `pctAppliedAfterLab` only matters when the lab is deducted.
+ */
+function calculationRule(labDeductedPerDoctor: boolean, pctAppliedAfterLab: boolean): string {
+  if (!labDeductedPerDoctor) {
+    return "النسبة تُحسب على المبلغ المُحصَّل، وأجور المختبر مصروف عام للعيادة ولا تُخصم من الطبيب.";
+  }
+  if (pctAppliedAfterLab) {
+    return "يُطرح ثمن المختبر المُسجَّل على حالات الطبيب من المبلغ المُحصَّل أولاً، ثم تُحسب النسبة على الباقي.";
+  }
+  return "النسبة تُحسب على المبلغ المُحصَّل كاملاً، ثم يُطرح ثمن المختبر المُسجَّل على حالات الطبيب من حصته.";
+}
 
 export default async function SettlementPage({
   searchParams,
@@ -18,6 +33,7 @@ export default async function SettlementPage({
     sp.period && /^\d{4}-\d{2}$/.test(sp.period) ? sp.period : currentPeriod();
 
   const result = computeSettlement(period);
+  const s = getSettings();
   const labDues = labDuesTotal(period);
   const today = todayISO();
   const prev = shiftPeriod(period, -1);
@@ -61,10 +77,12 @@ export default async function SettlementPage({
         </div>
 
         {/* قاعدة الاحتساب مكتوبة للعيادة، لا تحذير: من يقرأ الجدول يحتاج أن
-            يعرف على أي أساس خرجت الأرقام. تتبع ما هو مضبوط في «الإعدادات». */}
+            يعرف على أي أساس خرجت الأرقام. تتبع ما هو مضبوط في «الإعدادات».
+            🔴 كانت جملة ثابتة («لا تُخصم من الطبيب») تبقى كما هي بعد تفعيل خصم
+            المختبر — فتصف الجدول بعكس ما يحسبه. */}
         <p className="bg-muted/40 rounded-lg px-3 py-2.5 text-sm leading-relaxed">
-          طريقة الاحتساب الحالية: النسبة تُحسب على المبلغ المُحصَّل، وأجور المختبر
-          مصروف عام للعيادة ولا تُخصم من الطبيب. تُغيَّر من «الإعدادات».
+          طريقة الاحتساب الحالية: {calculationRule(s.labDeductedPerDoctor, s.pctAppliedAfterLab)}{" "}
+          تُغيَّر من «الإعدادات».
         </p>
 
         {/* سطر تعريفي فقط: مستحقات المختبر خارج الحصص تماماً، ويُقرأ تفصيلها في

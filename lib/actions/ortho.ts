@@ -9,6 +9,7 @@ import {
   paymentFailureMessage,
   recordCasePayment,
   updateCaseMeta,
+  setOrthoNextAppointment,
 } from "@/lib/mutations";
 import { listTreatmentTypes } from "@/lib/queries";
 import { parseAmount } from "@/lib/format";
@@ -27,6 +28,12 @@ function revalidateOrtho(caseId?: number) {
   revalidatePath("/ortho");
   if (caseId) revalidatePath(`/ortho/${caseId}`);
   revalidatePath("/dashboard");
+}
+
+/** «الموعد القادم» يُحجز في «المواعيد» أيضاً، فتُحدَّث شاشاتها. */
+function revalidateAppointments() {
+  revalidatePath("/appointments");
+  revalidatePath("/patients/[id]", "page");
 }
 
 // ── New ortho case (with optional down payment) ─────────────────────────────
@@ -101,9 +108,11 @@ export async function createOrthoCase(
       downPayment > 0 ? { amount: downPayment, kind: "down_payment" } : undefined,
   });
 
-  // createCase has no nextAppointment field — set it via case meta.
+  // createCase has no nextAppointment field. The mutation writes it to the case
+  // AND books it in «المواعيد» in one transaction. [2026-09-27]
   if (nextAppointment) {
-    updateCaseMeta(caseId, { nextAppointment }, "ortho");
+    setOrthoNextAppointment(caseId, nextAppointment);
+    revalidateAppointments();
   }
 
   revalidateOrtho(caseId);
@@ -274,12 +283,18 @@ export async function updateOrtho(
   const hasComplaint = formData.get("hasComplaint") != null;
 
   const updated = updateCaseMeta(d.caseId, {
-    nextAppointment: rawAppt === "" ? null : rawAppt,
     hasComplaint,
     complaintNote: d.complaintNote?.trim() || null,
   }, "ortho");
   if (!updated) return { error: "تعذّر تحديث الحالة؛ تحقّق من نوع العلاج" };
 
+  // الموعد يُحجز في «المواعيد» (أو يُنقل إن تغيّر) — لا شيء يحدث إن لم يتغيّر.
+  // [2026-09-27]
+  if (!setOrthoNextAppointment(d.caseId, rawAppt === "" ? null : rawAppt)) {
+    return { error: "تعذّر حفظ الموعد؛ تحقّق من التاريخ" };
+  }
+
   revalidateOrtho(d.caseId);
+  revalidateAppointments();
   return { ok: true };
 }

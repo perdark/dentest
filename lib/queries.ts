@@ -326,6 +326,51 @@ export function paymentsForCase(caseId: number) {
     .all();
 }
 
+/** Every payment across a patient's cases, newest first — «الدفعات» on the file. */
+export function paymentsForPatient(patientId: number) {
+  return db
+    .select({
+      id: payments.id,
+      caseId: payments.caseId,
+      amount: payments.amount,
+      kind: payments.kind,
+      paidDate: payments.paidDate,
+      note: payments.note,
+      doctorName: doctors.name,
+      treatment: treatmentTypes.nameAr,
+    })
+    .from(payments)
+    .innerJoin(cases, eq(payments.caseId, cases.id))
+    .innerJoin(doctors, eq(payments.doctorId, doctors.id))
+    .innerJoin(treatmentTypes, eq(cases.treatmentTypeId, treatmentTypes.id))
+    .where(eq(cases.patientId, patientId))
+    .orderBy(desc(payments.paidDate), desc(payments.id))
+    .all();
+}
+
+/** What deleting this patient takes with it — shown in the confirm dialog. */
+export function patientDeletionImpact(patientId: number) {
+  const pays = paymentsForPatient(patientId);
+  const caseCount =
+    db
+      .select({ v: sql<number>`count(*)` })
+      .from(cases)
+      .where(eq(cases.patientId, patientId))
+      .get()?.v ?? 0;
+  const apptCount =
+    db
+      .select({ v: sql<number>`count(*)` })
+      .from(appointments)
+      .where(eq(appointments.patientId, patientId))
+      .get()?.v ?? 0;
+  return {
+    cases: caseCount,
+    payments: pays.length,
+    paymentsTotal: pays.reduce((s, p) => s + p.amount, 0),
+    appointments: apptCount,
+  };
+}
+
 // ── Daily ledger ────────────────────────────────────────────────────────────
 export function dailyLedger(date: string) {
   return db

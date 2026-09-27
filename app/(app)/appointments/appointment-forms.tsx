@@ -2,7 +2,7 @@
 
 import { useActionState, useCallback, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Check, X, Trash2, RotateCcw, CalendarPlus } from "lucide-react";
+import { Plus, Check, X, Trash2, RotateCcw, CalendarPlus, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,11 +19,13 @@ import { NativeSelect } from "@/components/forms/native-select";
 import { SubmitButton } from "@/components/forms/submit-button";
 import { useActionToast } from "@/components/forms/use-action-toast";
 import { FormError } from "@/components/forms/form-error";
+import { PatientPicker } from "@/components/forms/patient-picker";
 import {
   bookAppointment,
   markAppointment,
   removeAppointment,
   rebookAppointment,
+  editAppointment,
   type ApptState,
 } from "@/lib/actions/appointments";
 import { APPT_STATUS_LABELS } from "@/lib/strings";
@@ -73,31 +75,37 @@ export function BookAppointmentDialog({
         </DialogHeader>
 
         <form ref={formRef} action={formAction} className="space-y-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="ap-name">اسم المراجع</Label>
-            <Input
-              id="ap-name"
-              name="patientName"
-              required
-              autoComplete="off"
-              className="h-11"
-              placeholder="الاسم الكامل"
-            />
-          </div>
+          {/* المراجع القديم يُختار من ملفه بدل كتابة اسمه: بلا هاتف كان كل حجز
+              يفتح له ملفاً جديداً. «مريض جديد» يبقى الافتراضي للحجز السريع. */}
+          <PatientPicker idPrefix="ap">
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="ap-name">اسم المراجع</Label>
+                <Input
+                  id="ap-name"
+                  name="patientName"
+                  required
+                  autoComplete="off"
+                  className="h-11"
+                  placeholder="الاسم الكامل"
+                />
+              </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="ap-phone">رقم الهاتف (اختياري)</Label>
-            <Input
-              id="ap-phone"
-              name="phone"
-              type="tel"
-              inputMode="tel"
-              dir="ltr"
-              autoComplete="off"
-              className="h-11 text-start"
-              placeholder="07XXXXXXXXX"
-            />
-          </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ap-phone">رقم الهاتف (اختياري)</Label>
+                <Input
+                  id="ap-phone"
+                  name="phone"
+                  type="tel"
+                  inputMode="tel"
+                  dir="ltr"
+                  autoComplete="off"
+                  className="h-11 text-start"
+                  placeholder="07XXXXXXXXX"
+                />
+              </div>
+            </div>
+          </PatientPicker>
 
           <div className="space-y-1.5">
             <Label htmlFor="ap-doctor">الطبيب</Label>
@@ -206,10 +214,14 @@ export function AppointmentActions({
   id,
   status,
   patientName,
+  appointment,
+  doctors,
 }: {
   id: number;
   status: string;
   patientName: string;
+  appointment: EditableAppointment;
+  doctors: DoctorOption[];
 }) {
   return (
     <div className="flex flex-wrap items-center justify-end gap-1.5">
@@ -234,8 +246,140 @@ export function AppointmentActions({
       {status === "came" ? (
         <RebookDialog id={id} patientName={patientName} />
       ) : null}
+      <EditAppointmentDialog
+        id={id}
+        patientName={patientName}
+        appointment={appointment}
+        doctors={doctors}
+      />
       <DeleteAppointment id={id} patientName={patientName} />
     </div>
+  );
+}
+
+// ── تعديل موعد ───────────────────────────────────────────────────────────────
+type EditableAppointment = {
+  doctorId: number | null;
+  doctorName: string | null;
+  apptDate: string;
+  apptTime: string | null;
+  note: string | null;
+};
+
+function EditAppointmentDialog({
+  id,
+  patientName,
+  appointment,
+  doctors,
+}: {
+  id: number;
+  patientName: string;
+  appointment: EditableAppointment;
+  doctors: DoctorOption[];
+}) {
+  const [open, setOpen] = useState(false);
+  const [formKey, setFormKey] = useState(0);
+  const [state, formAction] = useActionState<ApptState, FormData>(editAppointment, {});
+
+  useActionToast(state, "تم تعديل الموعد", useCallback(() => setOpen(false), []));
+
+  // طبيب موعدٍ أُوقف لاحقاً يبقى في القائمة، كي لا يمسحه حفظٌ لم يقصده.
+  const doctorList =
+    appointment.doctorId && !doctors.some((d) => d.id === appointment.doctorId)
+      ? [...doctors, { id: appointment.doctorId, name: appointment.doctorName ?? "" }]
+      : doctors;
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (next) setFormKey((k) => k + 1);
+      }}
+    >
+      <DialogTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="icon"
+            className="text-muted-foreground hover:text-foreground size-11"
+            aria-label={`تعديل موعد ${patientName}`}
+          />
+        }
+      >
+        <Pencil className="size-4" />
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>تعديل موعد {patientName}</DialogTitle>
+          <DialogDescription>
+            لتغيير اسم المراجع أو هاتفه افتح ملفّه من اسمه في القائمة.
+          </DialogDescription>
+        </DialogHeader>
+
+        <form key={formKey} action={formAction} className="space-y-3">
+          <input type="hidden" name="id" value={id} />
+          <div className="space-y-1.5">
+            <Label htmlFor={`ae-doctor-${id}`}>الطبيب</Label>
+            <NativeSelect
+              id={`ae-doctor-${id}`}
+              name="doctorId"
+              defaultValue={appointment.doctorId ? String(appointment.doctorId) : ""}
+            >
+              <option value="">— لم يُحدَّد بعد —</option>
+              {doctorList.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
+            </NativeSelect>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor={`ae-date-${id}`}>التاريخ</Label>
+              <Input
+                id={`ae-date-${id}`}
+                name="apptDate"
+                type="date"
+                required
+                defaultValue={appointment.apptDate}
+                className="h-11"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor={`ae-time-${id}`}>الوقت (اختياري)</Label>
+              <Input
+                id={`ae-time-${id}`}
+                name="apptTime"
+                type="time"
+                defaultValue={appointment.apptTime ?? ""}
+                className="h-11"
+              />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor={`ae-note-${id}`}>ملاحظة (اختياري)</Label>
+            <Input
+              id={`ae-note-${id}`}
+              name="note"
+              maxLength={500}
+              autoComplete="off"
+              defaultValue={appointment.note ?? ""}
+              className="h-11"
+            />
+          </div>
+
+          <FormError>{state.error}</FormError>
+
+          <div className="flex flex-col-reverse gap-2 pt-1 sm:flex-row sm:justify-end">
+            <DialogClose render={<Button type="button" variant="outline" className="h-11" />}>
+              إلغاء
+            </DialogClose>
+            <SubmitButton className="h-11">حفظ التعديل</SubmitButton>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 

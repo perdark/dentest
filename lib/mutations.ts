@@ -20,7 +20,7 @@ import {
 } from "@/lib/db/schema";
 import { isValidToothCode, type Surface } from "@/lib/db/teeth";
 import { recordEdit, nextCounter } from "@/lib/server-utils";
-import { isValidISODate, isRecordableDate, monthOf } from "@/lib/dates";
+import { isValidISODate, isRecordableDate, monthOf, todayISO } from "@/lib/dates";
 import { ORTHO_BUCKET, XRAY_BUCKET } from "@/lib/strings";
 
 function atomicMutation<TArgs extends unknown[], TResult>(
@@ -1150,6 +1150,481 @@ export const deleteLabEntry = atomicMutation((id: number): boolean => {
   });
   return true;
 });
+
+// ── Corrections: edit or delete a record entered by mistake ─────────────────
+/*
+ * The clinic's complaint (2026-09-27): a patient, a case, a payment or an
+ * appointment typed wrongly could not be fixed. These are the correction paths.
+ *
+ * Every one of them follows the rule `deletePayment` set [A1]: the row is
+ * changed or removed outright (a correction is not a refund), the full "before"
+ * survives in «سجل التعديلات», and a closed month the change touches is marked
+ * stale [D4]. A row that moves from one month to another stamps BOTH months,
+ * because both months' totals change.
+ */
+
+/** Audit one edit against every month it touches (old and new date). */
+function recordEditAcrossMonths(
+  entry: Omit<Parameters<typeof recordEdit>[0], "period">,
+  oldDate: string,
+  newDate: string,
+): void {
+  recordEdit({ ...entry, period: monthOf(oldDate) });
+  if (monthOf(newDate) !== monthOf(oldDate)) {
+    recordEdit({ ...entry, period: monthOf(newDate), note: "moved into this month" });
+  }
+}
+
+function paidOnCase(caseId: number, excludePaymentId?: number): number {
+  const where = excludePaymentId
+    ? and(eq(payments.caseId, caseId), sql`${payments.id} <> ${excludePaymentId}`)
+    : eq(payments.caseId, caseId);
+  return (
+    db
+      .select({ value: sql<number>`coalesce(sum(${payments.amount}), 0)` })
+      .from(payments)
+      .where(where)
+      .get()?.value ?? 0
+  );
+}
+
+export type PaymentEditFailure =
+  | "not_found"
+  | "invalid_amount"
+  | "invalid_date"
+  | "future_date"
+  | "exceeds_remaining"
+  | "exceeds_down_payment"
+  | "refund_exceeds_paid"
+  | "below_refunds";
+
+export function paymentEditFailureMessage(reason: PaymentEditFailure): string {
+  const messages = {
+    not_found: "لم يتم العثور على الدفعة؛ ربما حُذفت.",
+    invalid_amount: "أدخل مبلغاً صحيحاً أكبر من صفر.",
+    invalid_date: "التاريخ غير صحيح.",
+    future_date: "لا يمكن أن يكون تاريخ الدفعة بعد اليوم — تحقّق من السنة.",
+    exceeds_remaining: "المبلغ أكبر من إجمالي العلاج بعد احتساب باقي الدفعات.",
+    exceeds_down_payment: "المبلغ أكبر من المقدمة المتفق عليها.",
+    refund_exceeds_paid: "مبلغ الاسترجاع أكبر من صافي المبالغ المدفوعة.",
+    below_refunds: "المبلغ أقل مما استُرجع من هذه الحالة — عدّل الاسترجاع أولاً.",
+  } satisfies Record<PaymentEditFailure, string>;
+  return messages[reason];
+}
+
+/**
+ * Correct a payment's amount, date or note. `amount` is the magnitude as the
+ * clerk types it; a refund keeps its negative sign. The credited doctor and the
+ * kind are not editable here — the doctor follows the case (see
+ * `updateCaseRecord`), and a wrong kind is voided and re-entered.
+ *
+ * The same caps as `recordCasePayment` apply, measured against every OTHER
+ * payment on the case, so an edit can never produce a balance a fresh entry
+ * could not.
+ */
+export const updatePayment = sqlite.transaction(
+  (
+    id: number,
+    input: { amount: number; paidDate: string; note: string | null },
+  ): { ok: true } | { ok: false; reason: PaymentEditFailure } => {
+    if (!Number.isSafeInteger(input.amount) || input.amount <= 0) {
+      return { ok: false, reason: "invalid_amount" };
+    }
+    if (!isValidISODate(input.paidDate)) return { ok: false, reason: "invalid_date" };
+    if (!isRecordableDate(input.paidDate)) return { ok: false, reason: "future_date" };
+
+    const before = db.select().from(payments).where(eq(payments.id, id)).get();
+    if (!before) return { ok: false, reason: "not_found" };
+    const treatmentCase = db.select().from(cases).where(eq(cases.id, before.caseId)).get();
+    if (!treatmentCase) return { ok: false, reason: "not_found" };
+
+    const others = paidOnCase(before.caseId, id);
+    let amount: number;
+    if (before.kind === "refund") {
+      if (input.amount > Math.max(0, others)) return { ok: false, reason: "refund_exceeds_paid" };
+      amount = -input.amount;
+    } else {
+      const openEndedOrtho = isOpenEndedOrtho(
+        treatmentCase.treatmentTypeId,
+        treatmentCase.totalPrice,
+      );
+      if (!openEndedOrtho && others + input.amount > treatmentCase.totalPrice) {
+        return { ok: false, reason: "exceeds_remaining" };
+      }
+      if (
+        before.kind === "down_payment" &&
+        openEndedOrtho &&
+        treatmentCase.downPaymentAgreed > 0 &&
+        downPaymentCollected(before.caseId) - before.amount + input.amount >
+          treatmentCase.downPaymentAgreed
+      ) {
+        return { ok: false, reason: "exceeds_down_payment" };
+      }
+      // Lowering a payment under what was already refunded would leave the
+      // case with a negative net paid — money returned that never came in.
+      if (others + input.amount < 0) return { ok: false, reason: "below_refunds" };
+      amount = input.amount;
+    }
+
+    const after = { amount, paidDate: input.paidDate, note: input.note };
+    db.update(payments).set(after).where(eq(payments.id, id)).run();
+    recordEditAcrossMonths(
+      { entity: "payments", entityId: id, action: "update", before, after, note: "payment corrected" },
+      before.paidDate,
+      input.paidDate,
+    );
+    return { ok: true };
+  },
+) as unknown as (
+  id: number,
+  input: { amount: number; paidDate: string; note: string | null },
+) => { ok: true } | { ok: false; reason: PaymentEditFailure };
+
+export type CaseEditFailure =
+  | "not_found"
+  | "not_ordinary"
+  | "invalid_date"
+  | "invalid_amount"
+  | "below_paid"
+  | "doctor_not_found";
+
+export function caseEditFailureMessage(reason: CaseEditFailure): string {
+  const messages = {
+    not_found: "لم يتم العثور على الحالة؛ ربما حُذفت.",
+    not_ordinary: "الزراعة والتقويم تُعدَّل من شاشتيهما.",
+    invalid_date: "التاريخ غير صحيح — لا يمكن أن يكون بعد اليوم.",
+    invalid_amount: "تحقّق من السعر والخصم.",
+    below_paid: "الإجمالي أقل مما دُفع على هذه الحالة — عدّل الدفعات أو احذفها أولاً.",
+    doctor_not_found: "اختر طبيباً صحيحاً.",
+  } satisfies Record<CaseEditFailure, string>;
+  return messages[reason];
+}
+
+function isOrdinaryType(treatmentTypeId: number): boolean {
+  const type = db.select().from(treatmentTypes).where(eq(treatmentTypes.id, treatmentTypeId)).get();
+  return (
+    !!type &&
+    !type.isImplant &&
+    !type.isOrtho &&
+    type.settlementBucket !== "implant" &&
+    type.settlementBucket !== ORTHO_BUCKET &&
+    type.settlementBucket !== XRAY_BUCKET
+  );
+}
+
+/**
+ * Correct an ordinary case: treatment, doctor, date, price. Implant cards and
+ * ortho cases keep their own edit screens, which own their extra fields.
+ *
+ * A doctor chosen by mistake is a doctor wrongly credited: the case's payments
+ * that were credited to the old doctor move with it, or the wrong doctor would
+ * keep the share of work he never did [D2]. A payment deliberately credited to
+ * a third doctor stays where it is.
+ */
+export const updateCaseRecord = sqlite.transaction(
+  (
+    caseId: number,
+    input: {
+      doctorId: number;
+      treatmentTypeId: number;
+      openedDate: string;
+      listPrice: number;
+      discount: number;
+      notes: string | null;
+    },
+  ): { ok: true } | { ok: false; reason: CaseEditFailure } => {
+    const before = db.select().from(cases).where(eq(cases.id, caseId)).get();
+    if (!before) return { ok: false, reason: "not_found" };
+    if (!isOrdinaryType(before.treatmentTypeId) || !isOrdinaryType(input.treatmentTypeId)) {
+      return { ok: false, reason: "not_ordinary" };
+    }
+    if (!isRecordableDate(input.openedDate)) return { ok: false, reason: "invalid_date" };
+    if (
+      !Number.isSafeInteger(input.listPrice) ||
+      !Number.isSafeInteger(input.discount) ||
+      input.listPrice < 0 ||
+      input.discount < 0 ||
+      input.discount > input.listPrice
+    ) {
+      return { ok: false, reason: "invalid_amount" };
+    }
+    const totalPrice = input.listPrice - input.discount;
+    if (totalPrice < Math.max(0, paidOnCase(caseId))) return { ok: false, reason: "below_paid" };
+    if (!db.select({ id: doctors.id }).from(doctors).where(eq(doctors.id, input.doctorId)).get()) {
+      return { ok: false, reason: "doctor_not_found" };
+    }
+
+    const after = {
+      doctorId: input.doctorId,
+      treatmentTypeId: input.treatmentTypeId,
+      openedDate: input.openedDate,
+      listPrice: input.listPrice,
+      discount: input.discount,
+      totalPrice,
+      notes: input.notes,
+    };
+    db.update(cases).set({ ...after, updatedAt: Date.now() }).where(eq(cases.id, caseId)).run();
+    recordEditAcrossMonths(
+      { entity: "cases", entityId: caseId, action: "update", before, after, note: "case corrected" },
+      before.openedDate,
+      input.openedDate,
+    );
+
+    if (input.doctorId !== before.doctorId) {
+      const moved = db
+        .select()
+        .from(payments)
+        .where(and(eq(payments.caseId, caseId), eq(payments.doctorId, before.doctorId)))
+        .all();
+      for (const p of moved) {
+        db.update(payments).set({ doctorId: input.doctorId }).where(eq(payments.id, p.id)).run();
+        recordEdit({
+          entity: "payments",
+          entityId: p.id,
+          action: "update",
+          before: p,
+          after: { doctorId: input.doctorId },
+          period: monthOf(p.paidDate),
+          note: "doctor corrected on the case",
+        });
+      }
+    }
+    return { ok: true };
+  },
+) as unknown as (
+  caseId: number,
+  input: {
+    doctorId: number;
+    treatmentTypeId: number;
+    openedDate: string;
+    listPrice: number;
+    discount: number;
+    notes: string | null;
+  },
+) => { ok: true } | { ok: false; reason: CaseEditFailure };
+
+/**
+ * Delete a case with everything hanging off it: its payments and its tooth
+ * marks. Each payment is audited against its own month, so every closed month
+ * that counted it goes stale. An implant card number is not reused — the gap
+ * in the sequence is the honest record that a card was opened and withdrawn.
+ */
+export const deleteCaseCascade = atomicMutation(
+  (caseId: number): { payments: number; paymentsTotal: number } | null => {
+    const before = db.select().from(cases).where(eq(cases.id, caseId)).get();
+    if (!before) return null;
+
+    const pays = db.select().from(payments).where(eq(payments.caseId, caseId)).all();
+    for (const p of pays) {
+      db.delete(payments).where(eq(payments.id, p.id)).run();
+      recordEdit({
+        entity: "payments",
+        entityId: p.id,
+        action: "delete",
+        before: p,
+        period: monthOf(p.paidDate),
+        note: "deleted with its case",
+      });
+    }
+    const teeth = db.select().from(caseTeeth).where(eq(caseTeeth.caseId, caseId)).all();
+    db.delete(caseTeeth).where(eq(caseTeeth.caseId, caseId)).run();
+    db.delete(cases).where(eq(cases.id, caseId)).run();
+    recordEdit({
+      entity: "cases",
+      entityId: caseId,
+      action: "delete",
+      before: { ...before, teeth },
+      period: monthOf(before.openedDate),
+      note: "case deleted",
+    });
+    return {
+      payments: pays.length,
+      paymentsTotal: pays.reduce((s, p) => s + p.amount, 0),
+    };
+  },
+);
+
+/**
+ * Delete a patient and every record of theirs: cases (with payments and tooth
+ * marks) and appointments. A lab entry that named the patient is lab money the
+ * clinic still owes, so it is kept and only loses the link — and, like every
+ * lab write, never marks a month stale (golden rule 4).
+ */
+export const deletePatientCascade = atomicMutation(
+  (patientId: number): { cases: number; payments: number; appointments: number } | null => {
+    const before = db.select().from(patients).where(eq(patients.id, patientId)).get();
+    if (!before) return null;
+
+    const caseIds = db
+      .select({ id: cases.id })
+      .from(cases)
+      .where(eq(cases.patientId, patientId))
+      .all();
+    let paymentCount = 0;
+    for (const c of caseIds) paymentCount += deleteCaseCascade(c.id)?.payments ?? 0;
+
+    const appts = db.select().from(appointments).where(eq(appointments.patientId, patientId)).all();
+    for (const a of appts) {
+      db.delete(appointments).where(eq(appointments.id, a.id)).run();
+      recordEdit({ entity: "appointments", entityId: a.id, action: "delete", before: a, note: "deleted with its patient" });
+    }
+
+    const labs = db.select().from(labEntries).where(eq(labEntries.patientId, patientId)).all();
+    for (const l of labs) {
+      db.update(labEntries).set({ patientId: null }).where(eq(labEntries.id, l.id)).run();
+      recordEdit({
+        entity: "lab_entries",
+        entityId: l.id,
+        action: "update",
+        before: l,
+        after: { patientId: null },
+        period: l.entryDate.slice(0, 7),
+        markStale: false,
+        note: "patient deleted",
+      });
+    }
+
+    db.delete(patients).where(eq(patients.id, patientId)).run();
+    recordEdit({ entity: "patients", entityId: patientId, action: "delete", before, note: "patient deleted" });
+    return { cases: caseIds.length, payments: paymentCount, appointments: appts.length };
+  },
+);
+
+/** Correct an appointment's day, time, doctor or note. */
+export const updateAppointment = atomicMutation((
+  id: number,
+  fields: { doctorId: number | null; apptDate: string; apptTime: string | null; note: string | null },
+): boolean => {
+  const before = db.select().from(appointments).where(eq(appointments.id, id)).get();
+  if (!before) return false;
+  db.update(appointments).set(fields).where(eq(appointments.id, id)).run();
+  recordEdit({ entity: "appointments", entityId: id, action: "update", before, after: fields });
+  return true;
+});
+
+// ── Implant card edit (one address, not two) ────────────────────────────────
+/**
+ * Edit an implant card. The address belongs to the PATIENT: it is written to
+ * `patients.address`, which the patient file shows and every card of that
+ * patient now reads first. Until 2026-09-27 the card kept its own copy in
+ * `cases.address_snapshot`, edited only from here, so the file and the card
+ * could name two different houses with nothing saying which was current.
+ *
+ * The snapshot is still written with the same value: a card whose patient has
+ * no address falls back to it, and leaving the old value there would make a
+ * cleared address reappear from the fallback.
+ *
+ * `address` undefined = leave both untouched. Everything happens in one
+ * transaction, so a refused case edit (total below paid, wrong course) does
+ * not leave the patient's address changed on its own.
+ */
+export const updateImplantCardRecord = atomicMutation((
+  caseId: number,
+  fields: Parameters<typeof updateCaseMeta>[1],
+  address?: string | null,
+): boolean => {
+  const before = db.select().from(cases).where(eq(cases.id, caseId)).get();
+  if (!before) return false;
+  const patch = address === undefined ? fields : { ...fields, addressSnapshot: address };
+  if (!updateCaseMeta(caseId, patch, "implant")) return false;
+  if (address !== undefined) {
+    const patient = db
+      .select({ address: patients.address })
+      .from(patients)
+      .where(eq(patients.id, before.patientId))
+      .get();
+    // لا سطر في «سجل التعديلات» لعنوان لم يتغيّر.
+    if (patient && (patient.address ?? null) !== address) {
+      updatePatient(before.patientId, { address });
+    }
+  }
+  return true;
+});
+
+// ── Ortho next appointment → the appointments register ──────────────────────
+/**
+ * «الموعد القادم» on an ortho case, made a real booking.
+ *
+ * Until 2026-09-27 it lived only in `cases.next_appointment`, which neither
+ * «المواعيد» nor the dashboard reads — the clinic set a date on the ortho file
+ * and the patient never appeared in the day's list. Now the case field and a
+ * booked row in `appointments` are written together.
+ *
+ * Changing the date MOVES the booking made for the old date instead of adding
+ * a second one: a booked appointment for this patient on the old date is
+ * re-dated. Only when the old date is still in the FUTURE, though — the common
+ * flow is the patient sitting in the chair today while the next visit is set,
+ * and today's row is the record that they came; moving it would erase it.
+ * Clearing the date removes that future booking for the same reason it is
+ * moved: it is the same appointment.
+ *
+ * Returns false when the case is missing or not an ortho case, or the date is
+ * not a calendar day. A booking is in the future by definition, so this checks
+ * `isValidISODate`, not `isRecordableDate` (golden rule 6's exception).
+ */
+export const setOrthoNextAppointment = atomicMutation((
+  caseId: number,
+  date: string | null,
+): boolean => {
+  if (date !== null && !isValidISODate(date)) return false;
+  const before = db.select().from(cases).where(eq(cases.id, caseId)).get();
+  if (!before || treatmentCourse(before.treatmentTypeId) !== "ortho") return false;
+  const oldDate = before.nextAppointment;
+  if (oldDate === date) return true;
+
+  if (!updateCaseMeta(caseId, { nextAppointment: date }, "ortho")) return false;
+
+  const bookedOn = (day: string) =>
+    db
+      .select()
+      .from(appointments)
+      .where(
+        and(
+          eq(appointments.patientId, before.patientId),
+          eq(appointments.apptDate, day),
+          eq(appointments.status, "booked"),
+        ),
+      )
+      .get();
+  const movable = oldDate && oldDate > todayISO() ? bookedOn(oldDate) : undefined;
+  // موعد محجوز مسبقاً في «المواعيد» لليوم الجديد نفسه هو هذا الموعد — لا
+  // يُحجز مرتين، والمنقول من التاريخ القديم يُحذف بدل أن يصير نسخة ثانية.
+  const alreadyBooked = date !== null ? bookedOn(date) : undefined;
+
+  if (date === null || alreadyBooked) {
+    if (movable) deleteAppointment(movable.id);
+  } else if (movable) {
+    updateAppointment(movable.id, {
+      doctorId: movable.doctorId,
+      apptDate: date,
+      apptTime: movable.apptTime,
+      note: movable.note,
+    });
+  } else {
+    createAppointment({
+      patientId: before.patientId,
+      doctorId: before.doctorId,
+      apptDate: date,
+    });
+  }
+  return true;
+});
+
+/**
+ * Delete a cash movement typed by mistake. A doctor's payout is refused: it is
+ * written by «الحصيلة» together with the month's «تم الصرف» mark, and deleting
+ * the cash line alone would leave the month paid with no money having left.
+ */
+export const deleteCashMovement = atomicMutation(
+  (id: number): "ok" | "not_found" | "payout" => {
+    const before = db.select().from(cashMovements).where(eq(cashMovements.id, id)).get();
+    if (!before) return "not_found";
+    if (before.type === "payout" || before.refTable) return "payout";
+    db.delete(cashMovements).where(eq(cashMovements.id, id)).run();
+    recordEdit({ entity: "cash_movements", entityId: id, action: "delete", before });
+    return "ok";
+  },
+);
 
 // ── Wipe (demo data removal / start-over) ───────────────────────────────────
 

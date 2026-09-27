@@ -23,7 +23,7 @@ function revalidateSettlement() {
 export type CloseState = { ok?: boolean; error?: string };
 
 // ── إقفال الشهر ───────────────────────────────────────────────────────────────
-// يقرأ الشهر ونِسَب كل طبيب (pct_<id>) ثم يحسب ويُجمّد على الخادم. [D3][D4]
+// يقرأ الشهر ثم يحسب ويُجمّد على الخادم بنسبة كل طبيب المحفوظة. [D3][D4]
 export async function closeMonth(
   _prev: CloseState,
   formData: FormData,
@@ -33,28 +33,16 @@ export async function closeMonth(
   if (!parsed.success) return { error: "شهر غير صالح" };
   const period = parsed.data.period;
 
-  // تُجمَّع النِّسَب في خريطة تجاوزات {معرّف الطبيب: نسبة}.
-  // الحقل الفارغ يعني «غير محدّدة» فيُترك للحساب أن يرجع إلى نسبة الطبيب —
-  // ولا يُسجَّل صفراً. [A5]
-  const overrides: Record<number, number> = {};
-  for (const [key, value] of formData.entries()) {
-    const m = /^pct_(\d+)$/.exec(key);
-    if (!m) continue;
-    const id = Number(m[1]);
-    if (!Number.isInteger(id)) continue;
-    const raw = String(value).trim();
-    if (raw === "") continue;
-    const pct = Number(raw);
-    if (!Number.isFinite(pct)) continue;
-    overrides[id] = Math.min(100, Math.max(0, Math.round(pct)));
-  }
-
+  // ⚠️ لا تجاوزات نِسَب من النموذج بعد 2026-09-27: كانت خانة «النسبة %» في
+  // الجدول تُرسل `pct_<id>` فيُجمَّد الشهر بنسبة غير نسبة الطبيب المحفوظة.
+  // الإقفال الآن يُجمّد نسبة كل طبيب كما هي في شاشة «الأطباء». معامل
+  // `overrides` في lib/settlement.ts باقٍ (اختياري) لكن لا شاشة تمرّره. [§18]
   // شهر صُرفت فيه حصة لا يُعاد إقفاله — نُبلّغ بدل أن يبدو الإقفال ناجحاً. [D1]
   if (computeSettlement(period).anyPaid) {
     return { error: "تم صرف حصة في هذا الشهر — لا يمكن إعادة إقفاله." };
   }
 
-  closeSettlement(period, overrides);
+  closeSettlement(period);
   revalidateSettlement();
   return { ok: true };
 }

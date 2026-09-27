@@ -174,6 +174,19 @@ export function PayDialog({
             />
           </div>
 
+          {/* الملاحظة نفسها التي كانت في «إضافة جلسة» على بطاقة الزراعة: صار
+              هذا الحوار الطريق الوحيد لإضافة دفعة على حالة مسعّرة، فلا يُفقد
+              حقل كان موجوداً في أحد الطرق الثلاثة. [2026-09-27] */}
+          <div className="space-y-2">
+            <Label htmlFor={`note-${caseId}`}>ملاحظة (اختياري)</Label>
+            <Input
+              id={`note-${caseId}`}
+              name="note"
+              autoComplete="off"
+              className="h-11"
+            />
+          </div>
+
           <FormError>{state.error}</FormError>
 
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">

@@ -314,6 +314,14 @@ export default async function AppointmentsPage({
                       id={r.id}
                       status={r.status}
                       patientName={r.patientName}
+                      appointment={{
+                        doctorId: r.doctorId,
+                        doctorName: r.doctorName,
+                        apptDate: r.apptDate,
+                        apptTime: r.apptTime,
+                        note: r.note,
+                      }}
+                      doctors={doctors}
                     />
                   </div>
                 ))}

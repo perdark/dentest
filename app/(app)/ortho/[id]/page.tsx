@@ -17,6 +17,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { VoidPaymentButton } from "@/components/forms/void-payment-button";
+import { EditPaymentDialog } from "@/components/forms/edit-payment-dialog";
 import { OrthoMetaForm } from "./ortho-meta-form";
 import { OrthoPaymentForm } from "./payment-form";
 import { OrthoDownPaymentSection } from "./down-payment-form";
@@ -223,12 +224,23 @@ export default async function OrthoCasePage({
                       {p.note}
                     </TableCell>
                     <TableCell className="text-end">
-                      <VoidPaymentButton
-                        paymentId={p.id}
-                        amount={p.amount}
-                        paidDate={p.paidDate}
-                        patientName={detail.patientName}
-                      />
+                      <div className="flex items-center justify-end gap-1">
+                        <EditPaymentDialog
+                          paymentId={p.id}
+                          amount={p.amount}
+                          kind={p.kind}
+                          paidDate={p.paidDate}
+                          note={p.note}
+                          today={today}
+                          patientName={detail.patientName}
+                        />
+                        <VoidPaymentButton
+                          paymentId={p.id}
+                          amount={p.amount}
+                          paidDate={p.paidDate}
+                          patientName={detail.patientName}
+                        />
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))

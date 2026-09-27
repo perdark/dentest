@@ -63,6 +63,8 @@ test("«مريض مسجّل» in the daily entry adds to the same file", async (
   // One file, not two.
   await expect(list.getByRole("link", { name: PATIENT })).toHaveCount(1);
   await list.getByText(PATIENT).click();
-  await expect(page.getByRole("row").filter({ hasText: "تنظيف" })).toHaveCount(1);
-  await expect(page.getByRole("row").filter({ hasText: "حشوة" })).toHaveCount(1);
+  // Scoped to the cases table: «الدفعات» below lists the same treatments again.
+  const cases = page.locator('[data-tour="patient-cases"]');
+  await expect(cases.getByRole("row").filter({ hasText: "تنظيف" })).toHaveCount(1);
+  await expect(cases.getByRole("row").filter({ hasText: "حشوة" })).toHaveCount(1);
 });

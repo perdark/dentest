@@ -72,3 +72,20 @@ export async function markTourSeen(pathname: string): Promise<void> {
     .set({ toursSeen: JSON.stringify([...current, pathname]) })
     .where(eq(settings.id, ROW_ID));
 }
+
+/**
+ * Forget every completed tour — «إعادة تشغيل الشرح» in Settings.
+ *
+ * Written here, beside `markTourSeen`, because this module owns the column's
+ * format; like it, the write is not audit-logged — which walkthroughs were
+ * dismissed is UI state, not a clinic record. The authenticated entry point is
+ * `restartTutorial` in lib/actions/settings.ts; this guard only keeps the
+ * export (every export of a "use server" file is callable) inert when signed out.
+ */
+export async function resetTours(): Promise<void> {
+  if (!(await isAuthed())) return;
+  await db
+    .update(settings)
+    .set({ toursSeen: "[]" })
+    .where(eq(settings.id, ROW_ID));
+}

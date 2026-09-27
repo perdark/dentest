@@ -6,9 +6,8 @@ import { listTreatmentTypes, patientById } from "@/lib/queries";
 import {
   findOrCreatePatient,
   createCaseWithPayment,
-  updateCaseMeta,
-  paymentFailureMessage,
-  recordCasePayment,
+  updatePatient,
+  updateImplantCardRecord,
 } from "@/lib/mutations";
 import { parseAmount } from "@/lib/format";
 import { todayISO, isRecordableDate } from "@/lib/dates";
@@ -79,6 +78,14 @@ export async function createImplantCard(
       address: d.address || null,
     });
 
+  // العنوان يخصّ المريض لا البطاقة: مريض مسجّل بلا عنوان في ملفّه يأخذ العنوان
+  // المكتوب هنا. عنوان موجود في الملف لا يُستبدل من نموذج سريع — تعديله من
+  // «تعديل البطاقة» أو من ملف المريض. [2026-09-27]
+  const address = d.address.trim();
+  if (address && !patientById(patientId)?.address) {
+    updatePatient(patientId, { address });
+  }
+
   createCaseWithPayment({
     patientId,
     doctorId: d.doctorId,
@@ -87,7 +94,8 @@ export async function createImplantCard(
     listPrice: price,
     discount,
     totalPrice: total,
-    address: d.address || null,
+    // يبقى على البطاقة أيضاً: سجلّ للعنوان يوم فُتحت. [2026-09-27]
+    address: address || null,
     firstPayment: { amount: downPayment, kind: "down_payment" },
   });
 
@@ -100,8 +108,10 @@ export async function createImplantCard(
 // ── تعديل بيانات البطاقة ──────────────────────────────────────────────────────
 const updateSchema = z.object({
   caseId: z.coerce.number().int().positive(),
-  address: optionalText,
-  labCost: optionalText,
+  // الحقلان غائبان من النموذج أحياناً: «كلفة المختبر» تُخفى حين لا يُخصم
+  // المختبر من حصة الطبيب. الغائب لا يُمسّ — قيمة مخفية لا تُصفَّر. [2026-09-27]
+  address: z.string().optional(),
+  labCost: z.string().optional(),
   // السعر الكلي قبل الخصم — الإجمالي مشتقّ منه على الخادم، لا يُرسَل من المتصفّح.
   price: optionalText,
   discount: optionalText,
@@ -130,15 +140,22 @@ export async function updateImplantCard(
 
   // `device` is deliberately absent: updateCaseMeta patches only the keys it
   // is given, so an edit no longer blanks a value the screen cannot show.
-  const updated = updateCaseMeta(d.caseId, {
-    addressSnapshot: d.address.trim() || null,
-    labCost: Math.max(0, parseAmount(d.labCost)),
-    listPrice: price,
-    discount,
-    totalPrice: price - discount,
-    status: d.status,
-    notes: d.notes.trim() || null,
-  }, "implant");
+  // The same holds for `labCost` when the field was hidden.
+  // «العنوان» يُكتب في ملف المريض — انظر `updateImplantCardRecord`.
+  const updated = updateImplantCardRecord(
+    d.caseId,
+    {
+      ...(d.labCost !== undefined
+        ? { labCost: Math.max(0, parseAmount(d.labCost)) }
+        : {}),
+      listPrice: price,
+      discount,
+      totalPrice: price - discount,
+      status: d.status,
+      notes: d.notes.trim() || null,
+    },
+    d.address === undefined ? undefined : d.address.trim() || null,
+  );
   if (!updated) {
     return { error: "تعذّر تحديث البطاقة؛ تحقق من النوع ومن أن الإجمالي لا يقل عن المدفوع" };
   }
@@ -146,46 +163,7 @@ export async function updateImplantCard(
   revalidatePath("/implants");
   revalidatePath(`/implants/${d.caseId}`);
   revalidatePath("/dashboard");
-  return { ok: true };
-}
-
-// ── إضافة جلسة (دفعة) للبطاقة ─────────────────────────────────────────────────
-const sessionSchema = z.object({
-  caseId: z.coerce.number().int().positive(),
-  amount: z.string().trim().min(1, "أدخل مبلغ الجلسة"),
-  date: optionalText,
-  note: optionalText,
-});
-
-export async function addImplantSession(
-  _prev: ImplantFormState,
-  formData: FormData,
-): Promise<ImplantFormState> {
-  await requireAuth();
-  const parsed = sessionSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) {
-    return { error: parsed.error.issues[0]?.message ?? "تحقق من البيانات المُدخلة" };
-  }
-  const d = parsed.data;
-
-  const amount = Math.max(0, parseAmount(d.amount));
-  if (amount <= 0) {
-    return { error: "أدخل مبلغاً صحيحاً أكبر من صفر" };
-  }
-  const date = d.date && isRecordableDate(d.date) ? d.date : todayISO();
-
-  const result = recordCasePayment({
-    caseId: d.caseId,
-    amount,
-    kind: "session",
-    paidDate: date,
-    note: d.note.trim() || null,
-    expectedCourse: "implant",
-  });
-  if (!result.ok) return { error: paymentFailureMessage(result.reason) };
-
-  revalidatePath("/implants");
-  revalidatePath(`/implants/${d.caseId}`);
-  revalidatePath("/dashboard");
+  // العنوان صار في ملف المريض.
+  revalidatePath("/patients/[id]", "page");
   return { ok: true };
 }

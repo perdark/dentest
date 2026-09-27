@@ -2,7 +2,7 @@
 
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
-import { recordCashMovement } from "@/lib/mutations";
+import { recordCashMovement, deleteCashMovement } from "@/lib/mutations";
 import { parseAmount } from "@/lib/format";
 import { todayISO, isRecordableDate } from "@/lib/dates";
 import { requireAuth } from "@/lib/auth";
@@ -44,6 +44,28 @@ export async function addCashMovement(
     amount: d.direction === "out" ? -magnitude : magnitude,
     note: d.note || null,
   });
+
+  revalidatePath("/cash");
+  revalidatePath("/dashboard");
+  return { ok: true };
+}
+
+// ── حذف حركة نقدية خاطئة ─────────────────────────────────────────────────────
+export async function removeCashMovement(
+  _prev: CashState,
+  formData: FormData,
+): Promise<CashState> {
+  await requireAuth();
+  const parsed = z
+    .object({ id: z.coerce.number().int().positive() })
+    .safeParse(Object.fromEntries(formData));
+  if (!parsed.success) return { error: "حركة غير صالحة" };
+
+  const result = deleteCashMovement(parsed.data.id);
+  if (result === "not_found") return { error: "لم يتم العثور على الحركة؛ ربما حُذفت." };
+  if (result === "payout") {
+    return { error: "صرف حصة الطبيب مرتبط بشهره في «الحصيلة» ولا يُحذف من هنا." };
+  }
 
   revalidatePath("/cash");
   revalidatePath("/dashboard");

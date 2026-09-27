@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowRight } from "lucide-react";
-import { caseWithDetails, caseRaw, paymentsForCase } from "@/lib/queries";
+import { caseWithDetails, caseRaw, paymentsForCase, patientById } from "@/lib/queries";
+import { getSettings } from "@/lib/server-utils";
 import { formatIQD } from "@/lib/format";
 import { formatDateShort, formatDateShortY, todayISO } from "@/lib/dates";
 import { CASE_STATUS_LABELS, PAYMENT_KIND_LABELS } from "@/lib/strings";
@@ -19,6 +20,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { VoidPaymentButton } from "@/components/forms/void-payment-button";
+import { EditPaymentDialog } from "@/components/forms/edit-payment-dialog";
 import { CardActions } from "../card-actions";
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
@@ -61,6 +63,13 @@ export default async function ImplantCardPage({
   if (!details || !raw || !details.isImplant) notFound();
 
   const payments = paymentsForCase(caseId);
+  const today = todayISO();
+  // عنوان واحد: ملف المريض أولاً. عنوان البطاقة القديم (`address_snapshot`)
+  // يُقرأ فقط لبطاقة مريضها بلا عنوان في ملفّه — كانت البطاقة والملف يحملان
+  // عنوانين يُعدَّلان من شاشتين ولا يعرف أحدهما بالآخر. [2026-09-27]
+  const address = patientById(details.patientId)?.address || raw.addressSnapshot;
+  // «كلفة المختبر» لا تغيّر رقماً إلا مع «خصم المختبر من حصة الطبيب». [D6]
+  const showLabCost = getSettings().labDeductedPerDoctor;
 
   return (
     <div className="space-y-4">
@@ -89,15 +98,18 @@ export default async function ImplantCardPage({
         <CardActions
           card={{
             caseId: raw.id,
-            address: raw.addressSnapshot,
+            address,
             labCost: raw.labCost,
             listPrice: raw.listPrice,
             discount: raw.discount,
             status: raw.status,
             notes: raw.notes,
             paid: details.paid,
+            remaining: details.remaining,
+            patientName: details.patientName,
           }}
-          today={todayISO()}
+          today={today}
+          showLabCost={showLabCost}
         />
       </div>
 
@@ -120,7 +132,7 @@ export default async function ImplantCardPage({
                 </Link>
               </Field>
               <Field label="الطبيب">{details.doctorName}</Field>
-              <Field label="العنوان">{raw.addressSnapshot}</Field>
+              <Field label="العنوان">{address}</Field>
               <Field label="التاريخ">
                 <span dir="ltr" className="tabular-nums">
                   {formatDateShortY(details.openedDate)}
@@ -139,9 +151,11 @@ export default async function ImplantCardPage({
                   {CASE_STATUS_LABELS[details.status] ?? details.status}
                 </Badge>
               </Field>
-              <Field label="كلفة المختبر">
-                <span className="money tabular-nums">{formatIQD(raw.labCost)}</span>
-              </Field>
+              {showLabCost ? (
+                <Field label="كلفة المختبر">
+                  <span className="money tabular-nums">{formatIQD(raw.labCost)}</span>
+                </Field>
+              ) : null}
               <Field label="ملاحظات">
                 <span className="whitespace-pre-wrap">{raw.notes}</span>
               </Field>
@@ -209,12 +223,23 @@ export default async function ImplantCardPage({
                       {p.note}
                     </TableCell>
                     <TableCell className="text-end">
-                      <VoidPaymentButton
-                        paymentId={p.id}
-                        amount={p.amount}
-                        paidDate={p.paidDate}
-                        patientName={details.patientName}
-                      />
+                      <div className="flex items-center justify-end gap-1">
+                        <EditPaymentDialog
+                          paymentId={p.id}
+                          amount={p.amount}
+                          kind={p.kind}
+                          paidDate={p.paidDate}
+                          note={p.note}
+                          today={today}
+                          patientName={details.patientName}
+                        />
+                        <VoidPaymentButton
+                          paymentId={p.id}
+                          amount={p.amount}
+                          paidDate={p.paidDate}
+                          patientName={details.patientName}
+                        />
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}

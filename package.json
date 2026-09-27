@@ -15,7 +15,7 @@
     "test:audit": "node scripts/run-tsx.mjs --test tests/audited-mutations.test.ts",
     "test:xrays": "node scripts/run-tsx.mjs --test tests/xray-income.test.ts",
     "test:ortho": "node scripts/run-tsx.mjs --test tests/ortho-open-total.test.ts",
-    "test": "npm run test:settlement && npm run test:payments && npm run test:audit && npm run test:xrays && npm run test:ortho && npm run test:lab && npm run test:dates && npm run test:wipe && npm run test:restore",
+    "test": "npm run test:settlement && npm run test:payments && npm run test:audit && npm run test:xrays && npm run test:ortho && npm run test:lab && npm run test:dates && npm run test:wipe && npm run test:restore && npm run test:corrections && npm run test:links",
     "verify": "node scripts/run-verify.mjs",
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",
@@ -38,7 +38,9 @@
     "test:lab": "node scripts/run-tsx.mjs --test tests/lab-dues.test.ts",
     "test:dates": "node scripts/run-tsx.mjs --test tests/date-display.test.ts",
     "test:wipe": "node scripts/run-tsx.mjs --test tests/wipe-records.test.ts",
-    "test:restore": "node scripts/run-tsx.mjs --test tests/backup-restore.test.ts"
+    "test:restore": "node scripts/run-tsx.mjs --test tests/backup-restore.test.ts",
+    "test:corrections": "node scripts/run-tsx.mjs --test tests/corrections.test.ts",
+    "test:links": "node scripts/run-tsx.mjs --test tests/implant-ortho-links.test.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",

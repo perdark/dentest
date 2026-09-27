@@ -19,6 +19,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { CashForm } from "./cash-form";
+import { ConfirmDeleteDialog } from "@/components/forms/confirm-delete-dialog";
+import { removeCashMovement } from "@/lib/actions/cash";
 
 export const metadata: Metadata = { title: "الحركات النقدية" };
 
@@ -140,7 +142,10 @@ export default async function CashPage({
                   <TableHead className="ps-(--card-spacing)">التاريخ</TableHead>
                   <TableHead>النوع</TableHead>
                   <TableHead>ملاحظة</TableHead>
-                  <TableHead className="pe-(--card-spacing) text-end">المبلغ</TableHead>
+                  <TableHead className="text-end">المبلغ</TableHead>
+                  <TableHead className="pe-(--card-spacing)">
+                    <span className="sr-only">حذف</span>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -161,11 +166,34 @@ export default async function CashPage({
                     </TableCell>
                     <TableCell
                       className={cn(
-                        "money pe-(--card-spacing) text-end text-lg font-bold tabular-nums",
+                        "money text-end text-lg font-bold tabular-nums",
                         r.amount < 0 && "text-destructive",
                       )}
                     >
                       {formatIQD(r.amount)}
+                    </TableCell>
+                    {/* صرف حصة الطبيب مربوط بشهره في «الحصيلة» فلا يُحذف من هنا. */}
+                    <TableCell className="pe-(--card-spacing) text-end">
+                      {r.type !== "payout" && !r.refTable ? (
+                        <ConfirmDeleteDialog
+                          action={removeCashMovement}
+                          fields={{ id: r.id }}
+                          title="حذف حركة نقدية"
+                          ariaLabel={`حذف حركة ${CASH_MOVE_LABELS[r.type] ?? r.type}`}
+                          successMessage="تم حذف الحركة"
+                          description={
+                            <>
+                              <p>
+                                ستُحذف حركة «{CASH_MOVE_LABELS[r.type] ?? r.type}» بمبلغ{" "}
+                                <span className="money">{formatIQD(r.amount)}</span> بتاريخ{" "}
+                                <span dir="ltr" className="tabular-nums">{formatDateShort(r.moveDate)}</span>
+                                ، ويتغيّر النقد المتوفر بقدرها.
+                              </p>
+                              <p className="text-destructive font-medium">هل أنت متأكد؟</p>
+                            </>
+                          }
+                        />
+                      ) : null}
                     </TableCell>
                   </TableRow>
                 ))}

@@ -9,10 +9,9 @@ import {
   CircleQuestionMark,
   Database,
   RotateCcw,
-  ShieldQuestion,
   Trash2,
 } from "lucide-react";
-import type { Doctor, Settings } from "@/lib/db/schema";
+import type { Settings } from "@/lib/db/schema";
 
 // Only the display fields cross the server/client boundary — secret columns
 // (pinHash / sessionSecret) are intentionally excluded.
@@ -21,20 +20,18 @@ type SettingsView = Pick<
   | "clinicName"
   | "openingCashBalance"
   | "cashReserveThreshold"
-  | "defaultCommissionPct"
   | "labDeductedPerDoctor"
   | "pctAppliedAfterLab"
-  | "staffSalaryMode"
 >;
 import {
   updateGeneral,
   updateAccounting,
-  updateDoctorPct,
   changePin,
   backupDb,
   wipeRecords,
   restoreBackup,
   cancelRestore,
+  restartTutorial,
   type PinState,
   type SettingsState,
   type BackupFile,
@@ -45,7 +42,6 @@ import { formatIQD, formatNumber } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import {
   Card,
@@ -57,16 +53,6 @@ import {
 } from "@/components/ui/card";
 import { SubmitButton } from "@/components/forms/submit-button";
 import { NativeSelect } from "@/components/forms/native-select";
-
-/** نسبة لم تُدخَل بعد — علامة تشغيلية، لا ملاحظة داخلية. */
-function UnsetBadge() {
-  return (
-    <Badge variant="outline" className="gap-1 font-normal">
-      <ShieldQuestion />
-      لم تُحدَّد بعد
-    </Badge>
-  );
-}
 
 /**
  * كل نموذج إعدادات يُظهر نتيجة صريحة. بدون هذا كان الإدخال المرفوض يبدو
@@ -162,10 +148,21 @@ function AccountingSection({ settings }: { settings: SettingsView }) {
         <CardHeader>
           <CardTitle>إعدادات الحساب</CardTitle>
           <CardDescription>
-            النِّسَب وقواعد احتساب حصص الأطباء والحد الأدنى للاحتياطي النقدي.
+            قواعد احتساب حصص الأطباء والحد الأدنى للاحتياطي النقدي.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
+          {/* نسبة كل طبيب مكانها الوحيد شاشة «الأطباء» — كانت تُعدَّل من ثلاثة
+              أماكن (هنا، وملف الطبيب، وجدول الحصيلة) فلا يُعرف أيّها الصحيح.
+              السطر يدلّ من يبحث عنها هنا إلى مكانها. [§18] */}
+          <p className="bg-muted/40 rounded-lg px-3 py-2.5 text-sm leading-relaxed">
+            نسبة كل طبيب وتفعيله يُضبطان من{" "}
+            <Link href="/doctors" className="text-primary font-medium underline-offset-4 hover:underline">
+              شاشة «الأطباء»
+            </Link>
+            ، من ملف كل طبيب.
+          </p>
+
           {/* حد الاحتياطي النقدي */}
           <div className="space-y-2">
             <Label htmlFor="cashReserveThreshold">حد الاحتياطي النقدي (د.ع)</Label>
@@ -180,26 +177,6 @@ function AccountingSection({ settings }: { settings: SettingsView }) {
             />
             <p className="text-muted-foreground text-sm">
               يظهر تنبيه في «الحركات النقدية» عندما يتجاوز النقد المتوفر هذا الحد (حالياً {formatIQD(settings.cashReserveThreshold)}).
-            </p>
-          </div>
-
-          {/* النسبة الافتراضية */}
-          <div className="space-y-2">
-            <Label htmlFor="defaultCommissionPct">نسبة الطبيب الافتراضية (%)</Label>
-            <Input
-              id="defaultCommissionPct"
-              name="defaultCommissionPct"
-              type="number"
-              min={0}
-              max={100}
-              defaultValue={settings.defaultCommissionPct}
-              inputMode="numeric"
-              dir="ltr"
-              autoComplete="off"
-              className="h-11 w-32 text-start"
-            />
-            <p className="text-muted-foreground text-sm">
-              تُستخدم للأطباء الذين لم تُحدَّد نسبتهم بعد.
             </p>
           </div>
 
@@ -235,20 +212,6 @@ function AccountingSection({ settings }: { settings: SettingsView }) {
             />
           </div>
 
-          {/* طريقة الرواتب */}
-          <div className="space-y-2">
-            <Label htmlFor="staffSalaryMode">طريقة رواتب الموظفين</Label>
-            <Input
-              id="staffSalaryMode"
-              name="staffSalaryMode"
-              defaultValue={settings.staffSalaryMode}
-              required
-              autoComplete="off"
-              className="h-11"
-            />
-            <p className="text-muted-foreground text-sm">مثال: راتب ثابت شهري، أو إدخال يدوي.</p>
-          </div>
-
           <FormError state={state} />
         </CardContent>
         <CardFooter>
@@ -258,85 +221,6 @@ function AccountingSection({ settings }: { settings: SettingsView }) {
         </CardFooter>
       </Card>
     </form>
-  );
-}
-
-// ── نِسَب الأطباء ─────────────────────────────────────────────────────────────
-function DoctorRow({ doctor }: { doctor: Doctor }) {
-  const { state, formAction } = useSettingsForm(
-    updateDoctorPct,
-    `تم حفظ بيانات ${doctor.name}`,
-  );
-
-  return (
-    <form
-      action={formAction}
-      className="flex flex-wrap items-end gap-3 border-b pb-3 last:border-0 last:pb-0"
-    >
-      <input type="hidden" name="doctorId" value={doctor.id} />
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="font-medium">{doctor.name}</span>
-          {doctor.isOwner ? <Badge variant="outline">المالك</Badge> : null}
-          {doctor.doesOrtho ? <Badge variant="outline">تقويم</Badge> : null}
-          {doctor.commissionPct == null ? <UnsetBadge /> : null}
-        </div>
-        <FormError state={state} />
-      </div>
-
-      <label className="flex h-11 cursor-pointer items-center gap-2 rounded-lg border border-input px-3">
-        <input
-          type="checkbox"
-          name="isActive"
-          defaultChecked={doctor.isActive}
-          className="size-5 accent-primary"
-        />
-        <span className="text-sm">مُفعَّل</span>
-      </label>
-
-      <div className="space-y-1">
-        <Label htmlFor={`pct_${doctor.id}`} className="text-muted-foreground text-sm">
-          النسبة (%)
-        </Label>
-        <Input
-          id={`pct_${doctor.id}`}
-          name="commissionPct"
-          type="number"
-          min={0}
-          max={100}
-          defaultValue={doctor.commissionPct ?? ""}
-          placeholder="مثال: 40"
-          inputMode="numeric"
-          dir="ltr"
-          autoComplete="off"
-          aria-label={`نسبة ${doctor.name}`}
-          className="h-11 w-24 text-start"
-        />
-      </div>
-      <SubmitButton size="sm" className="h-11 px-4">
-        حفظ
-      </SubmitButton>
-    </form>
-  );
-}
-
-function DoctorsSection({ doctors }: { doctors: Doctor[] }) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>الأطباء والنِّسَب</CardTitle>
-        <CardDescription>
-          نسبة كل طبيب من المبلغ المحصَّل (%). اتركها فارغة إن لم تُؤكَّد بعد —
-          عندها تُستخدم النسبة الافتراضية أعلاه. إلغاء التفعيل يُخفي الطبيب من
-          قوائم الاختيار دون المساس بحساباته السابقة.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {doctors.map((d) => (
-          <DoctorRow key={d.id} doctor={d} />
-        ))}
-      </CardContent>
-    </Card>
   );
 }
 
@@ -581,18 +465,28 @@ function RestoreSection({
 // ── الشرح التعريفي ───────────────────────────────────────────────────────────
 function TutorialSection() {
   const router = useRouter();
+  const [pending, startTransition] = useTransition();
 
+  // 🔴 كان الزر يمسح `localStorage` وحده، بينما الجولات المُشاهَدة صارت تُحفظ في
+  // قاعدة البيانات (`settings.tours_seen`، انظر lib/tour-state.ts) — فكان يُعلن
+  // «سيبدأ الشرح من جديد» ولا يتغيّر شيء. المسح الآن على الخادم.
   function restart() {
-    // Forget every "already seen" mark so the walkthrough offers itself again
-    // on the dashboard, exactly as it does on a brand-new install.
-    try {
-      const stale = Object.keys(localStorage).filter((k) => k.startsWith("zuha.tour."));
-      for (const key of stale) localStorage.removeItem(key);
-    } catch {
-      // Storage disabled — the «؟» button still starts the tour by hand.
-    }
-    toast.success("سيبدأ الشرح من جديد");
-    router.push("/dashboard");
+    startTransition(async () => {
+      const res = await restartTutorial();
+      if (!res.ok) {
+        toast.error("تعذّرت إعادة الشرح", { description: res.error });
+        return;
+      }
+      // الجولة تفتح وحدها فقط على نظام بلا سجلات (components/tour.tsx) — عيادة تعمل
+      // لا تُقاطَع. فالرسالة تقول ما سيحدث فعلاً بدل وعدٍ لا يتحقق.
+      toast.success(
+        res.autoStart ? "سيبدأ الشرح من جديد" : "أُعيد ضبط الشرح",
+        res.autoStart
+          ? undefined
+          : { description: "اضغط زر «؟» أعلى أي شاشة لبدء شرحها." },
+      );
+      router.push("/dashboard");
+    });
   }
 
   return (
@@ -605,9 +499,15 @@ function TutorialSection() {
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-2 sm:flex-row">
-        <Button type="button" variant="outline" onClick={restart} className="h-11">
+        <Button
+          type="button"
+          variant="outline"
+          onClick={restart}
+          disabled={pending}
+          className="h-11"
+        >
           <CircleQuestionMark className="size-4" />
-          إعادة تشغيل الشرح
+          {pending ? "جارٍ الإعادة…" : "إعادة تشغيل الشرح"}
         </Button>
         <Button
           type="button"
@@ -689,12 +589,10 @@ function ResetSection() {
 
 export function SettingsForms({
   settings,
-  doctors,
   backups,
   pendingRestoreName,
 }: {
   settings: SettingsView;
-  doctors: Doctor[];
   backups: BackupFile[];
   pendingRestoreName: string | null;
 }) {
@@ -702,7 +600,6 @@ export function SettingsForms({
     <div className="space-y-6">
       <GeneralSection settings={settings} />
       <AccountingSection settings={settings} />
-      <DoctorsSection doctors={doctors} />
       <PinSection />
       <BackupSection backups={backups} />
       <RestoreSection backups={backups} pending={pendingRestoreName} />

@@ -15,6 +15,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { PatientForm } from "./patient-form";
+import { ToastFromUrl } from "@/components/forms/toast-from-url";
 
 /** «راجعوا مؤخراً» = خلال ثلاثة أشهر — الفترة التي تسأل عنها العيادة عملياً. */
 const RECENT_DAYS = 90;
@@ -22,7 +23,13 @@ const RECENT_DAYS = 90;
 export default async function PatientsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; doctorId?: string; balance?: string; recent?: string }>;
+  searchParams: Promise<{
+    q?: string;
+    doctorId?: string;
+    balance?: string;
+    recent?: string;
+    deleted?: string;
+  }>;
 }) {
   const sp = await searchParams;
   const q = sp.q?.trim() ?? "";
@@ -52,6 +59,7 @@ export default async function PatientsPage({
 
   return (
     <div className="space-y-4">
+      {sp.deleted === "1" ? <ToastFromUrl message="تم حذف المريض وكل سجلاته" /> : null}
       <div className="flex items-center justify-between gap-3">
         <h1 className="flex items-center gap-2 text-2xl font-bold"><Users className="text-muted-foreground size-6 shrink-0" />المرضى</h1>
         <div data-tour="patients-add">

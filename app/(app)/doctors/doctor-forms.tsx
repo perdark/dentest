@@ -60,7 +60,7 @@ export function AddDoctorDialog() {
         <DialogHeader>
           <DialogTitle>إضافة طبيب</DialogTitle>
           <DialogDescription>
-            الاسم يكفي للبدء — النسبة واسم المختبر يمكن ضبطهما لاحقاً.
+            الاسم والنسبة مطلوبان — اسم المختبر يمكن ضبطه لاحقاً.
           </DialogDescription>
         </DialogHeader>
 
@@ -72,12 +72,21 @@ export function AddDoctorDialog() {
 
           <div className="space-y-1.5">
             <Label htmlFor="dr-pct">النسبة (%)</Label>
+            {/* إلزامية: هذا المكان الوحيد الذي تُضبط منه نسبة الطبيب، ولا نسبة
+                افتراضية تسري بصمت إن تُركت فارغة. «0» نسبة صحيحة. [§18] */}
             <Input
               id="dr-pct"
               name="commissionPct"
+              type="number"
+              required
+              min={0}
+              max={100}
+              step={1}
               inputMode="numeric"
-              className="h-11"
-              placeholder="تُترك فارغة لاستعمال النسبة الافتراضية"
+              dir="ltr"
+              autoComplete="off"
+              className="h-11 text-start"
+              placeholder="مثال: 40"
             />
           </div>
 
@@ -171,11 +180,23 @@ export function DoctorInfoForm({
           <Input
             id="di-pct"
             name="commissionPct"
+            type="number"
+            required
+            min={0}
+            max={100}
+            step={1}
             inputMode="numeric"
+            dir="ltr"
+            autoComplete="off"
             defaultValue={commissionPct ?? ""}
-            className="h-11"
-            placeholder="النسبة الافتراضية"
+            className="h-11 text-start"
+            placeholder="مثال: 40"
           />
+          {commissionPct == null ? (
+            <p className="text-muted-foreground text-sm">
+              النسبة لم تُحدَّد لهذا الطبيب بعد — أدخلها ثم احفظ.
+            </p>
+          ) : null}
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="di-lab">اسم المختبر</Label>
@@ -301,15 +322,12 @@ export function LabEntryForm({ doctorId, today }: { doctorId: number; today: str
           />
         </div>
 
+        {/* المريض — إن لزم — يُذكر هنا نصاً. لا حقل مريض: كان يفتح ملفاً
+            فارغاً في «المرضى» لكل اسم يُكتب. [§18] */}
         <div className="space-y-1.5">
-          <Label htmlFor="le-patient">المريض (اختياري)</Label>
-          <Input id="le-patient" name="patientName" autoComplete="off" className="h-11" />
+          <Label htmlFor="le-note">ملاحظة (اختياري)</Label>
+          <Input id="le-note" name="note" autoComplete="off" className="h-11" />
         </div>
-      </div>
-
-      <div className="space-y-1.5">
-        <Label htmlFor="le-note">ملاحظة (اختياري)</Label>
-        <Input id="le-note" name="note" autoComplete="off" className="h-11" />
       </div>
 
       {parsed !== 0 ? (

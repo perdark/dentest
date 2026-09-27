@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { DayPicker } from "@/components/forms/day-picker";
 import { VoidPaymentButton } from "@/components/forms/void-payment-button";
+import { EditPaymentDialog } from "@/components/forms/edit-payment-dialog";
 import { EntryDialog } from "./entry-dialog";
 
 /** Shift a YYYY-MM-DD by N days using local time. */
@@ -187,6 +188,15 @@ export default async function DailyPage({
                       >
                         {formatIQD(line.amount)}
                       </span>
+                      <EditPaymentDialog
+                        paymentId={line.paymentId}
+                        amount={line.amount}
+                        kind={line.kind}
+                        paidDate={date}
+                        note={line.note}
+                        today={today}
+                        patientName={line.patientName}
+                      />
                       <VoidPaymentButton
                         paymentId={line.paymentId}
                         amount={line.amount}
