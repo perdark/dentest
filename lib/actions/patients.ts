@@ -8,6 +8,8 @@ import {
   updatePatient as updatePatientMutation,
   deletePatientCascade,
   createCaseWithTeeth,
+  createSharedCases,
+  sharedCaseFailureMessage,
   findOrCreateTreatmentType,
   toothMarkFailureMessage,
   treatmentTypeFailureMessage,
@@ -18,6 +20,7 @@ import { MEDICAL_FLAGS } from "@/lib/strings";
 import { parseAmount } from "@/lib/format";
 import { isRecordableDate } from "@/lib/dates";
 import { toothMarksSchema, toToothMarkInputs } from "@/lib/tooth-marks";
+import { parseCaseShares } from "@/lib/case-shares";
 
 export type PatientFormState = { error?: string; ok?: boolean };
 
@@ -179,7 +182,9 @@ export type PatientTreatmentState = { ok?: boolean; error?: string };
 
 const treatmentSchema = z.object({
   patientId: z.coerce.number().int().positive(),
-  doctorId: z.coerce.number().int().positive("اختر الطبيب"),
+  // Absent when the treatment is shared («+ طبيب آخر»): each row then
+  // carries its own doctor (`parseCaseShares`).
+  doctorId: z.coerce.number().int().positive("اختر الطبيب").optional(),
   treatmentName: z.string().trim().min(1, "اكتب اسم العلاج"),
   price: z.string().optional().default(""),
   discount: z.string().optional().default(""),
@@ -211,7 +216,11 @@ export async function addPatientTreatmentAction(
   const d = parsed.data;
 
   if (!patientById(d.patientId)) return { error: "المريض غير موجود" };
-  if (!listDoctors().some((doc) => doc.id === d.doctorId)) return { error: "اختر طبيباً صحيحاً" };
+  const shared = parseCaseShares(formData);
+  if (shared && !shared.ok) return { error: shared.error };
+  const known = new Set(listDoctors().map((doc) => doc.id));
+  const chosen = shared ? shared.shares.map((sh) => sh.doctorId) : [d.doctorId ?? 0];
+  if (!chosen.every((id) => known.has(id))) return { error: "اختر طبيباً صحيحاً" };
   if (!isRecordableDate(d.date)) {
     return { error: "التاريخ غير صحيح — لا يمكن إضافة علاج بتاريخ لاحق لليوم" };
   }
@@ -225,6 +234,23 @@ export async function addPatientTreatmentAction(
   const marks = toothMarksSchema.safeParse(rawMarks);
   if (!marks.success) {
     return { error: marks.error.issues[0]?.message ?? "مخطط الأسنان غير صحيح" };
+  }
+
+  if (shared) {
+    // Last, because it can write — as on the single-doctor path below.
+    const treatment = findOrCreateTreatmentType(d.treatmentName);
+    if (!treatment.ok) return { error: treatmentTypeFailureMessage(treatment.reason) };
+    const result = createSharedCases({
+      patientId: d.patientId,
+      treatmentTypeId: treatment.id,
+      openedDate: d.date,
+      notes: d.notes || null,
+      shares: shared.shares,
+      marks: toToothMarkInputs(marks.data),
+    });
+    if (!result.ok) return { error: sharedCaseFailureMessage(result.reason) };
+    revalidatePatientTreatmentScreens(d.patientId);
+    return { ok: true };
   }
 
   // المبالغ تُحسب هنا من جديد — لا يُوثق بأي رقم محسوب في المتصفّح.
@@ -243,7 +269,7 @@ export async function addPatientTreatmentAction(
 
   const result = createCaseWithTeeth({
     patientId: d.patientId,
-    doctorId: d.doctorId,
+    doctorId: d.doctorId!,
     treatmentTypeId: treatment.id,
     openedDate: d.date,
     listPrice: price,
@@ -255,10 +281,14 @@ export async function addPatientTreatmentAction(
   });
   if (!result.ok) return { error: toothMarkFailureMessage(result.reason) };
 
-  revalidatePath(`/patients/${d.patientId}`);
+  revalidatePatientTreatmentScreens(d.patientId);
+  return { ok: true };
+}
+
+function revalidatePatientTreatmentScreens(patientId: number) {
+  revalidatePath(`/patients/${patientId}`);
   revalidatePath("/patients");
   revalidatePath("/daily");
   revalidatePath("/debts");
   revalidatePath("/dashboard");
-  return { ok: true };
 }

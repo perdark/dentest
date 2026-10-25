@@ -6,12 +6,15 @@ import {
   findOrCreatePatient,
   findOrCreateTreatmentType,
   createCaseWithPayment,
+  createSharedCases,
+  sharedCaseFailureMessage,
   treatmentTypeFailureMessage,
 } from "@/lib/mutations";
+import { parseCaseShares } from "@/lib/case-shares";
 import { parseAmount } from "@/lib/format";
 import { isRecordableDate } from "@/lib/dates";
 import { requireAuth } from "@/lib/auth";
-import { patientById } from "@/lib/queries";
+import { listDoctors, patientById } from "@/lib/queries";
 
 export type VisitFormState = { ok?: boolean; error?: string };
 
@@ -34,7 +37,9 @@ export async function createVisitNewCase(
       patientId: z.coerce.number().int().positive().optional(),
       patientName: z.string().optional().default(""),
       phone: z.string().optional(),
-      doctorId: z.coerce.number(),
+      // Absent when the treatment is shared: each row then carries its own
+      // doctor (`parseCaseShares`).
+      doctorId: z.coerce.number().optional(),
       treatmentName: z.string().trim().min(1),
       price: z.string().optional(),
       discount: z.string().optional(),
@@ -51,12 +56,38 @@ export async function createVisitNewCase(
   } else if (!patientName) {
     return { error: "اسم المريض مطلوب" };
   }
-  if (!Number.isInteger(d.doctorId) || d.doctorId <= 0) return { error: "اختر الطبيب" };
+  // «+ طبيب آخر»: one row per doctor, each its own case. null = one doctor.
+  const shared = parseCaseShares(formData);
+  if (shared && !shared.ok) return { error: shared.error };
+  if (!shared && (!Number.isInteger(d.doctorId) || (d.doctorId ?? 0) <= 0)) {
+    return { error: "اختر الطبيب" };
+  }
   // Not just a real calendar day — a day a case can have been opened on. A
   // mistyped year sends the whole case and its first payment out of the
   // month's books. [2026-09-22]
   if (!isRecordableDate(d.date)) {
     return { error: "التاريخ غير صحيح — لا يمكن فتح حساب بتاريخ لاحق لليوم" };
+  }
+
+  if (shared) {
+    const known = new Set(listDoctors().map((doc) => doc.id));
+    if (!shared.shares.every((s) => known.has(s.doctorId))) return { error: "اختر طبيباً صحيحاً" };
+    // Same order as the single-doctor path: the write-capable check is last.
+    const treatment = findOrCreateTreatmentType(d.treatmentName);
+    if (!treatment.ok) return { error: treatmentTypeFailureMessage(treatment.reason) };
+    const patientId =
+      d.patientId ?? findOrCreatePatient({ fullName: patientName, phone: d.phone || null });
+    const result = createSharedCases({
+      patientId,
+      treatmentTypeId: treatment.id,
+      openedDate: d.date,
+      shares: shared.shares,
+    });
+    if (!result.ok) return { error: sharedCaseFailureMessage(result.reason) };
+    revalidatePath("/daily");
+    revalidatePath("/dashboard");
+    revalidatePath(`/patients/${patientId}`);
+    return { ok: true };
   }
 
   // Totals are computed server-side — never trusted from the client.
@@ -79,7 +110,7 @@ export async function createVisitNewCase(
 
   createCaseWithPayment({
     patientId,
-    doctorId: d.doctorId,
+    doctorId: d.doctorId!,
     treatmentTypeId: treatment.id,
     openedDate: d.date,
     listPrice: price,

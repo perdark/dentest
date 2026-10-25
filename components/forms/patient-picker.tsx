@@ -22,16 +22,26 @@ import { searchPatientsAction, type PatientMatch } from "@/lib/actions/patients"
 export function PatientPicker({
   idPrefix,
   children,
+  existingOnly = false,
+  onPick,
 }: {
   idPrefix: string;
   /** The new-patient fields (name, phone…), shown only in «مريض جديد». */
-  children: React.ReactNode;
+  children?: React.ReactNode;
+  /** Search registered patients only — no «مريض جديد» (e.g. «استلام مبلغ»). */
+  existingOnly?: boolean;
+  /** Told whenever the picked patient changes (null when cleared). */
+  onPick?: (patient: PatientMatch | null) => void;
 }) {
-  const [mode, setMode] = useState<"new" | "existing">("new");
+  const [mode, setMode] = useState<"new" | "existing">(existingOnly ? "existing" : "new");
+  const [picked, setPickedState] = useState<PatientMatch | null>(null);
+  function setPicked(next: PatientMatch | null) {
+    setPickedState(next);
+    onPick?.(next);
+  }
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<PatientMatch[]>([]);
   const [searching, setSearching] = useState(false);
-  const [picked, setPicked] = useState<PatientMatch | null>(null);
   // Only the answer to the latest keystroke may land: a slow early search
   // must not overwrite the list the clerk is already looking at.
   const latest = useRef(0);
@@ -70,6 +80,7 @@ export function PatientPicker({
 
   return (
     <div className="space-y-3">
+      {existingOnly ? null : (
       <div className="grid grid-cols-2 gap-2" role="group" aria-label="المريض">
         <Button
           type="button"
@@ -92,6 +103,7 @@ export function PatientPicker({
           مريض مسجّل
         </Button>
       </div>
+      )}
 
       {/* Keyed so a mode switch mounts fresh fields: without it React reuses
           the new-patient phone input as the search box, same position and

@@ -17,7 +17,6 @@ import type { Settings } from "@/lib/db/schema";
 // (pinHash / sessionSecret) are intentionally excluded.
 type SettingsView = Pick<
   Settings,
-  | "clinicName"
   | "openingCashBalance"
   | "cashReserveThreshold"
   | "labDeductedPerDoctor"
@@ -91,26 +90,15 @@ function formatBytes(bytes: number): string {
 
 // ── العيادة ──────────────────────────────────────────────────────────────────
 function GeneralSection({ settings }: { settings: SettingsView }) {
-  const { state, formAction } = useSettingsForm(updateGeneral, "تم حفظ بيانات العيادة");
+  const { state, formAction } = useSettingsForm(updateGeneral, "تم الحفظ");
   return (
     <form action={formAction}>
       <Card>
         <CardHeader>
-          <CardTitle>العيادة</CardTitle>
-          <CardDescription>اسم العيادة والرصيد النقدي الافتتاحي.</CardDescription>
+          <CardTitle>الصندوق</CardTitle>
+          <CardDescription>الرصيد النقدي الافتتاحي.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="clinicName">اسم العيادة</Label>
-            <Input
-              id="clinicName"
-              name="clinicName"
-              defaultValue={settings.clinicName}
-              required
-              autoComplete="off"
-              className="h-11"
-            />
-          </div>
           <div className="space-y-2">
             <Label htmlFor="openingCashBalance">الرصيد النقدي الافتتاحي (د.ع)</Label>
             <Input

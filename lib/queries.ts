@@ -398,6 +398,41 @@ export function dailyLedger(date: string) {
     .all();
 }
 
+/**
+ * Treatments opened on `date` that took no money that day — a free visit
+ * (price 0) or work done on credit. «الدفتر اليومي» lists payment lines, so
+ * these used to save with «تم الحفظ» and then appear nowhere on the day they
+ * happened. They are shown beside the money, never added to it. [2026-10-22]
+ */
+export function casesOpenedWithoutPayment(date: string) {
+  return caseBase()
+    .where(
+      sql`${cases.openedDate} = ${date} and ${cases.status} != 'cancelled'
+        and not exists (select 1 from payments p where p.case_id = ${cases.id} and p.paid_date = ${date})`,
+    )
+    .orderBy(doctors.sortOrder, cases.id)
+    .all();
+}
+
+/**
+ * A patient's cases that can still take money, for «استلام مبلغ»: anything
+ * with a balance, and every open ortho case (open-ended — each session is
+ * paid as it comes). Cancelled cases refuse money in `recordCasePayment`, so
+ * they are not offered. Largest balance first: that is usually what the
+ * patient came to pay. [2026-10-22]
+ */
+export function collectableCasesForPatient(patientId: number) {
+  return caseBase()
+    .where(
+      sql`${cases.patientId} = ${patientId} and ${cases.status} != 'cancelled' and (
+        (${notOrtho} and (${cases.totalPrice} - (${paidExpr})) > 0)
+        or (${treatmentTypes.settlementBucket} = ${ORTHO_BUCKET} and ${cases.status} = 'open')
+      )`,
+    )
+    .orderBy(sql`(${cases.totalPrice} - (${paidExpr})) desc`, desc(cases.openedDate))
+    .all();
+}
+
 // `openCasesBrief` and `collectableCaseCount` lived here until 2026-09-22.
 // They fed the «دفعة على علاج سابق» picker in the daily entry dialog, which
 // 1923cc0 removed; after that no screen called either one, and the only thing
@@ -876,10 +911,25 @@ export function closedPeriodEditCount(): number {
 }
 
 // ── Dashboard ───────────────────────────────────────────────────────────────
+/**
+ * «تحصيل هذا الشهر» — every payment dated in `period` (refunds negative) plus
+ * the month's X-ray films. The header shows this: the clinic asked for the top
+ * number to start from zero with each new month rather than carry the drawer's
+ * running balance, which stays on «النقد المتوفر» in «الحركات النقدية». [2026-10-22]
+ */
+export function monthCollectedTotal(period: string = currentPeriod()): number {
+  return (
+    (db
+      .select({ v: sql<number>`coalesce(sum(${payments.amount}),0)` })
+      .from(payments)
+      .where(sql`substr(${payments.paidDate}, 1, 7) = ${period}`)
+      .get()?.v ?? 0) + xrayFilmIncomeForPeriod(period)
+  );
+}
+
 export function dashboardStats() {
   const today = todayISO();
   const period = currentPeriod();
-  const monthFilter = sql`substr(${payments.paidDate}, 1, 7) = ${period}`;
 
   // «تحصيل اليوم/الشهر» = ما دخل الصندوق فعلاً، والفيلم منه: هو نقد بلا سطر
   // دفعة. لولا جمعه هنا لاختلف مجموع الشاشة عن «النقد المتوفر» فوقها مباشرة،
@@ -887,9 +937,7 @@ export function dashboardStats() {
   const todayCollected =
     (db.select({ v: sql<number>`coalesce(sum(${payments.amount}),0)` }).from(payments).where(eq(payments.paidDate, today)).get()?.v ?? 0) +
     (db.select({ v: sql<number>`coalesce(sum(${xrayFilms.price}),0)` }).from(xrayFilms).where(eq(xrayFilms.filmDate, today)).get()?.v ?? 0);
-  const monthCollected =
-    (db.select({ v: sql<number>`coalesce(sum(${payments.amount}),0)` }).from(payments).where(monthFilter).get()?.v ?? 0) +
-    xrayFilmIncomeForPeriod(period);
+  const monthCollected = monthCollectedTotal(period);
   const monthExpenses =
     db.select({ v: sql<number>`coalesce(sum(${expenses.amount}),0)` }).from(expenses).where(sql`substr(${expenses.expenseDate},1,7) = ${period}`).get()?.v ?? 0;
   // نفس استثناء التقويم المطبَّق في «الديون» — الرقمان يجب أن يتطابقا. [2026-08-19]

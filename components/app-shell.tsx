@@ -84,14 +84,13 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
 }
 
 export function AppShell({
-  clinicName,
-  cashOnHand,
+  monthCollected,
   offerIntro,
   toursSeen,
   children,
 }: {
-  clinicName: string;
-  cashOnHand: number;
+  /** «تحصيل هذا الشهر» — starts from zero every month. */
+  monthCollected: number;
   /** System nobody has used for real yet — the intro tour may open itself. */
   offerIntro: boolean;
   /** Pathnames whose tour is done. From the database, not localStorage. */
@@ -105,7 +104,6 @@ export function AppShell({
     <div className="flex h-full flex-col">
       <div className="border-b p-4">
         <p className="text-lg font-bold">زُهى</p>
-        <p className="text-muted-foreground truncate text-xs">{clinicName}</p>
       </div>
       <div data-tour="nav" className="flex-1 overflow-y-auto">
         <NavLinks onNavigate={() => setOpen(false)} />
@@ -158,13 +156,13 @@ export function AppShell({
           <div
             data-tour="cash"
             className="bg-muted/40 flex items-center gap-2 rounded-md border px-2.5 py-1"
-            title="النقد المتوفر"
+            title="تحصيل هذا الشهر — يبدأ من صفر كل شهر. رصيد الدرج في «الحركات النقدية»."
           >
             <Wallet className="text-muted-foreground size-5 shrink-0" />
             <span className="flex flex-col leading-tight">
-              <span className="text-muted-foreground text-xs">النقد المتوفر</span>
+              <span className="text-muted-foreground text-xs">تحصيل هذا الشهر</span>
               <span className="money text-base font-bold sm:text-lg">
-                {formatIQD(cashOnHand)}
+                {formatIQD(monthCollected)}
               </span>
             </span>
           </div>

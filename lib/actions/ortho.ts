@@ -12,7 +12,7 @@ import {
   setOrthoNextAppointment,
 } from "@/lib/mutations";
 import { listTreatmentTypes } from "@/lib/queries";
-import { parseAmount } from "@/lib/format";
+import { isExplicitZero, parseAmount } from "@/lib/format";
 import { todayISO, isValidISODate, isRecordableDate } from "@/lib/dates";
 import { requireAuth } from "@/lib/auth";
 
@@ -136,15 +136,18 @@ export async function addOrthoPayment(
   if (!parsed.success) return { error: "تحقّق من بيانات الدفعة" };
   const d = parsed.data;
 
+  // «0» مكتوبة صراحةً = جلسة مجانية: تظهر في سجل الجلسات ولا تغيّر أي مبلغ.
+  // [قرار العيادة 2026-10-22]
   const amount = parseAmount(d.amount ?? "");
-  if (amount <= 0) return { error: "أدخل مبلغاً صحيحاً أكبر من صفر" };
+  const free = isExplicitZero(d.amount);
+  if (!free && amount <= 0) return { error: "أدخل مبلغ الجلسة — أو 0 لجلسة مجانية" };
 
   const paidDate =
     d.paidDate && isRecordableDate(d.paidDate) ? d.paidDate : todayISO();
 
   const result = recordCasePayment({
     caseId: d.caseId,
-    amount,
+    amount: free ? 0 : amount,
     kind: "session",
     paidDate,
     note: d.note?.trim() || null,

@@ -1,6 +1,6 @@
 {
   "name": "zuha",
-  "version": "2.2.0",
+  "version": "2.4.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -15,7 +15,7 @@
     "test:audit": "node scripts/run-tsx.mjs --test tests/audited-mutations.test.ts",
     "test:xrays": "node scripts/run-tsx.mjs --test tests/xray-income.test.ts",
     "test:ortho": "node scripts/run-tsx.mjs --test tests/ortho-open-total.test.ts",
-    "test": "npm run test:settlement && npm run test:payments && npm run test:audit && npm run test:xrays && npm run test:ortho && npm run test:lab && npm run test:dates && npm run test:wipe && npm run test:restore && npm run test:corrections && npm run test:links",
+    "test": "npm run test:settlement && npm run test:payments && npm run test:audit && npm run test:xrays && npm run test:ortho && npm run test:lab && npm run test:dates && npm run test:wipe && npm run test:restore && npm run test:corrections && npm run test:links && npm run test:amounts && npm run test:multidoc && npm run test:cloud",
     "verify": "node scripts/run-verify.mjs",
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",
@@ -32,7 +32,7 @@
     "app:build": "npm run build && npm run stage",
     "app:start": "electron .",
     "stage:win": "node scripts/stage-app.mjs --platform=win32 --arch=x64",
-    "dist:win": "npm run build && npm run stage:win && electron-builder --win --x64",
+    "dist:win": "npm run build && npm run stage:win && npm run bundle:updater && electron-builder --win --x64 --publish never",
     "dist:win:demo": "npm run build && npm run db:demo:build && npm run stage:win -- --seed-db=./build/demo/zuha.db && electron-builder --win --x64 --config electron-builder.demo.cjs",
     "dist:linux": "npm run app:build && electron-builder --linux dir",
     "test:lab": "node scripts/run-tsx.mjs --test tests/lab-dues.test.ts",
@@ -40,7 +40,14 @@
     "test:wipe": "node scripts/run-tsx.mjs --test tests/wipe-records.test.ts",
     "test:restore": "node scripts/run-tsx.mjs --test tests/backup-restore.test.ts",
     "test:corrections": "node scripts/run-tsx.mjs --test tests/corrections.test.ts",
-    "test:links": "node scripts/run-tsx.mjs --test tests/implant-ortho-links.test.ts"
+    "test:links": "node scripts/run-tsx.mjs --test tests/implant-ortho-links.test.ts",
+    "test:amounts": "node scripts/run-tsx.mjs --test tests/free-amount-input.test.ts",
+    "test:multidoc": "node scripts/run-tsx.mjs --test tests/multi-doctor-case.test.ts",
+    "test:cloud": "node scripts/run-tsx.mjs --test tests/cloud-backup.test.ts",
+    "bundle:updater": "node scripts/bundle-updater.mjs",
+    "backup:keygen": "node scripts/run-tsx.mjs scripts/backup-keygen.ts",
+    "backup:open": "node scripts/run-tsx.mjs scripts/backup-open.ts",
+    "release:win": "npm run build && npm run stage:win && npm run bundle:updater && electron-builder --win --x64 --publish always"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
@@ -70,6 +77,7 @@
     "drizzle-kit": "^0.31.10",
     "electron": "^41.7.1",
     "electron-builder": "^26.15.3",
+    "electron-updater": "^6.8.11",
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
     "tailwindcss": "^4",
@@ -107,14 +115,14 @@
     "win": {
       "target": [
         {
-          "target": "zip",
+          "target": "nsis",
           "arch": [
             "x64"
           ]
         }
       ],
       "icon": "electron/icon.ico",
-      "artifactName": "Zuha-${version}-win-x64.${ext}"
+      "artifactName": "Zuha-${version}-win-x64-setup.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -140,6 +148,14 @@
       {
         "from": "electron/اقرأني.txt",
         "to": "اقرأني.txt"
+      }
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "perdark",
+        "repo": "dentest",
+        "releaseType": "release"
       }
     ]
   }

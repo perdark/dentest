@@ -20,6 +20,13 @@ import { useActionToast } from "@/components/forms/use-action-toast";
 import { FormError } from "@/components/forms/form-error";
 import { MoneySummary } from "@/components/forms/money-summary";
 import { PatientPicker } from "@/components/forms/patient-picker";
+import {
+  AddDoctorButton,
+  DoctorSharesEditor,
+  newShareRow,
+  unusedDoctorId,
+  type ShareRow,
+} from "@/components/forms/doctor-shares";
 import { parseAmount } from "@/lib/format";
 import { createVisitNewCase, type VisitFormState } from "@/lib/actions/visits";
 import { EARLIEST_RECORD_DATE } from "@/lib/dates";
@@ -58,10 +65,10 @@ export function EntryDialog({
         <DialogHeader>
           <DialogTitle>تسجيل جديد</DialogTitle>
           {/* هذه النافذة تفتح حساباً جديداً فقط. تسديد حالة مفتوحة يجري من
-              «الديون ← إضافة دفعة» حيث تُختار الحالة برصيدها. */}
+              «استلام مبلغ» بجانبها أو «الديون ← إضافة دفعة» — المسار نفسه. */}
           <DialogDescription>
-            هذه النافذة تفتح حساب علاج جديد — لمريض جديد أو لمريض مسجّل. إذا
-            كان المريض يسدّد على حالة مفتوحة، سجّل الدفعة من شاشة «الديون».
+            هذه النافذة تفتح حساب علاج جديد — لمريض جديد أو لمريض مسجّل. السعر 0
+            يعني جلسة مجانية. إذا كان المريض يسدّد على علاج سابق، استخدم «استلام مبلغ».
           </DialogDescription>
         </DialogHeader>
         <NewCaseForm
@@ -102,8 +109,28 @@ function NewCaseForm({
   const [price, setPrice] = useState("");
   const [discount, setDiscount] = useState("0");
   const [paidNow, setPaidNow] = useState("0");
+  // Held here, not in the input: switching to «+ طبيب آخر» moves the date
+  // field, and a date already changed must survive the move.
+  const [openedDate, setOpenedDate] = useState(date > today ? today : date);
+  const [doctorId, setDoctorId] = useState(doctors[0] ? String(doctors[0].id) : "");
+  // null = one doctor (the form as it always was); 2+ rows = a shared treatment.
+  const [shares, setShares] = useState<ShareRow[] | null>(null);
 
-  useActionToast(state, "تم حفظ العلاج الجديد ودفعته", onSuccess);
+  useActionToast(state, "تم حفظ العلاج الجديد", onSuccess);
+
+  function shareWithAnotherDoctor() {
+    // What was already typed becomes the first doctor's share — net of any
+    // discount, because a shared treatment is split as net shares.
+    const first = newShareRow(doctorId, price.trim() ? String(net) : "", paidNow);
+    setShares([first, newShareRow(unusedDoctorId(doctors, [first]))]);
+  }
+  function backToOneDoctor(last: ShareRow) {
+    setShares(null);
+    setDoctorId(last.doctorId);
+    setPrice(last.price);
+    setDiscount("0");
+    setPaidNow(last.paid);
+  }
 
   // الحساب الحيّ — عرض فقط. الخادم يعيد حساب الرقم نفسه عند الحفظ.
   const net = Math.max(0, parseAmount(price) - parseAmount(discount));
@@ -144,20 +171,26 @@ function NewCaseForm({
         </div>
       </PatientPicker>
 
-      <div className="space-y-2">
-        <Label htmlFor="nc-doctor">الطبيب</Label>
-        <NativeSelect
-          id="nc-doctor"
-          name="doctorId"
-          defaultValue={doctors[0] ? String(doctors[0].id) : ""}
-        >
-          {doctors.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.name}
-            </option>
-          ))}
-        </NativeSelect>
-      </div>
+      {shares ? null : (
+        <div className="space-y-2">
+          <Label htmlFor="nc-doctor">الطبيب</Label>
+          <NativeSelect
+            id="nc-doctor"
+            name="doctorId"
+            value={doctorId}
+            onChange={(e) => setDoctorId(e.target.value)}
+          >
+            {doctors.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.name}
+              </option>
+            ))}
+          </NativeSelect>
+          {/* علاج واحد يشترك فيه أكثر من طبيب: لكل طبيب حصته من السعر ومن
+              المدفوع، وتُحفظ لكل منهم حالة خاصة به. */}
+          {doctors.length > 1 ? <AddDoctorButton onClick={shareWithAnotherDoctor} /> : null}
+        </div>
+      )}
 
       {/* العلاج يُكتب باليد: أسماء العلاجات تختلف من عيادة إلى أخرى ومن حالة إلى
           أخرى، والأسماء المستعملة سابقاً تُقترح هنا فتُكتب مرة واحدة فقط. */}
@@ -179,71 +212,101 @@ function NewCaseForm({
         </datalist>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-2">
-          <Label htmlFor="nc-price">السعر</Label>
-          {/* حقول المال تُقرأ بحجم النص الكامل: `Input` يهبط إلى 14px على
-              الشاشات الكبيرة، وهذا رقم يُدقَّق لا رقم يُتصفَّح. */}
-          <Input
-            id="nc-price"
-            name="price"
-            inputMode="numeric"
-            className="h-11 text-base tabular-nums"
-            placeholder="0"
-            value={price}
-            onChange={(e) => setPrice(e.target.value)}
+      {shares ? (
+        <>
+          <DoctorSharesEditor
+            idPrefix="nc"
+            doctors={doctors}
+            rows={shares}
+            onChange={setShares}
+            onCollapse={backToOneDoctor}
           />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="nc-discount">الخصم</Label>
-          <Input
-            id="nc-discount"
-            name="discount"
-            inputMode="numeric"
-            className="h-11 text-base tabular-nums"
-            value={discount}
-            onChange={(e) => setDiscount(e.target.value)}
-          />
-        </div>
-      </div>
+          <div className="space-y-2">
+            <Label htmlFor="nc-date">التاريخ</Label>
+            {/* لا يُفتح حساب بتاريخ قادم: خطأ رقم واحد في السنة يُخرج الحالة
+                ودفعتها الأولى من حساب الشهر بلا أي تنبيه. */}
+            <Input
+              id="nc-date"
+              name="date"
+              type="date"
+              className="h-11"
+              value={openedDate}
+              onChange={(e) => setOpenedDate(e.target.value)}
+              min={EARLIEST_RECORD_DATE}
+              max={today}
+            />
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label htmlFor="nc-price">السعر</Label>
+              {/* حقول المال تُقرأ بحجم النص الكامل: `Input` يهبط إلى 14px على
+                  الشاشات الكبيرة، وهذا رقم يُدقَّق لا رقم يُتصفَّح. */}
+              <Input
+                id="nc-price"
+                name="price"
+                inputMode="numeric"
+                className="h-11 text-base tabular-nums"
+                placeholder="0"
+                value={price}
+                onChange={(e) => setPrice(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="nc-discount">الخصم</Label>
+              <Input
+                id="nc-discount"
+                name="discount"
+                inputMode="numeric"
+                className="h-11 text-base tabular-nums"
+                value={discount}
+                onChange={(e) => setDiscount(e.target.value)}
+              />
+            </div>
+          </div>
 
-      <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-2">
-          <Label htmlFor="nc-paid">المبلغ المدفوع الآن</Label>
-          <Input
-            id="nc-paid"
-            name="paidNow"
-            inputMode="numeric"
-            className="h-11 text-base tabular-nums"
-            value={paidNow}
-            onChange={(e) => setPaidNow(e.target.value)}
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="nc-date">التاريخ</Label>
-          {/* لا يُفتح حساب بتاريخ قادم: خطأ رقم واحد في السنة يُخرج الحالة
-              ودفعتها الأولى من حساب الشهر بلا أي تنبيه. */}
-          <Input
-            id="nc-date"
-            name="date"
-            type="date"
-            className="h-11"
-            defaultValue={date > today ? today : date}
-            min={EARLIEST_RECORD_DATE}
-            max={today}
-          />
-        </div>
-      </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label htmlFor="nc-paid">المبلغ المدفوع الآن</Label>
+              <Input
+                id="nc-paid"
+                name="paidNow"
+                inputMode="numeric"
+                className="h-11 text-base tabular-nums"
+                value={paidNow}
+                onChange={(e) => setPaidNow(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="nc-date">التاريخ</Label>
+              {/* لا يُفتح حساب بتاريخ قادم: خطأ رقم واحد في السنة يُخرج الحالة
+                  ودفعتها الأولى من حساب الشهر بلا أي تنبيه. */}
+              <Input
+                id="nc-date"
+                name="date"
+                type="date"
+                className="h-11"
+                value={openedDate}
+              onChange={(e) => setOpenedDate(e.target.value)}
+                min={EARLIEST_RECORD_DATE}
+                max={today}
+              />
+            </div>
+          </div>
 
-      {/* لا يظهر السطر على نموذج فارغ: بلا سعر مكتوب لا معنى لصافٍ ولا لمتبقٍ. */}
-      {price.trim() ? (
-        <MoneySummary
-          figures={[
-            { label: "الصافي", amount: net },
-            { label: "المتبقي", amount: remaining, emphasis: true },
-          ]}
-        />
-      ) : null}
+          {/* لا يظهر السطر على نموذج فارغ: بلا سعر مكتوب لا معنى لصافٍ ولا لمتبقٍ. */}
+          {price.trim() ? (
+            <MoneySummary
+              figures={[
+                { label: "الصافي", amount: net },
+                { label: "المتبقي", amount: remaining, emphasis: true },
+              ]}
+            />
+          ) : null}
+        </>
+      )}
 
       <FormError>{state.error}</FormError>
 

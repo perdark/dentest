@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, CalendarDays, StickyNote } from "lucide-react";
 import {
+  casesOpenedWithoutPayment,
   dailyLedger,
   listDoctors,
   normalTreatmentSuggestions,
@@ -9,7 +10,7 @@ import {
 import { todayISO, isValidISODate, formatDateAr } from "@/lib/dates";
 import { formatIQD } from "@/lib/format";
 import {
-  PAYMENT_KIND_LABELS,
+  PAYMENT_KIND_LABELS, paymentKindLabel,
   XRAY_BUCKET,
   XRAY_PLACEMENT_LABELS,
 } from "@/lib/strings";
@@ -22,6 +23,7 @@ import { DayPicker } from "@/components/forms/day-picker";
 import { VoidPaymentButton } from "@/components/forms/void-payment-button";
 import { EditPaymentDialog } from "@/components/forms/edit-payment-dialog";
 import { EntryDialog } from "./entry-dialog";
+import { ReceiptDialog } from "./receipt-dialog";
 
 /** Shift a YYYY-MM-DD by N days using local time. */
 function shiftISO(iso: string, days: number): string {
@@ -52,6 +54,9 @@ export default async function DailyPage({
   // الأشعة لا دفعات لها: الفيلم مدفوع بتاريخه، فيُقرأ من سجله ويدخل إجمالي
   // اليوم كي يطابق الدفتر ما في الدرج. [قرار العيادة 2026-08-25][D9]
   const films = xrayFilmsForDate(date);
+  // علاجات فُتحت اليوم بلا دفعة: جلسة مجانية (سعر 0) أو عمل على الحساب.
+  // تُعرض ولا تُجمع — لم يدخل الدرج منها شيء. [2026-10-22]
+  const unpaidOpened = casesOpenedWithoutPayment(date);
   const filmsTotal = films.reduce((s, f) => s + f.price, 0);
   // «الدفتر اليومي» opens normal-work cases only — implants, ortho and x-rays
   // each have their own screen — so it offers only doctors who do normal work.
@@ -87,7 +92,8 @@ export default async function DailyPage({
           <h1 className="flex items-center gap-2 text-2xl font-bold"><CalendarDays className="text-muted-foreground size-6 shrink-0" />الدفتر اليومي</h1>
           <p className="text-base font-medium">{formatDateAr(date)}</p>
         </div>
-        <div data-tour="daily-add">
+        <div data-tour="daily-add" className="flex flex-wrap gap-2">
+          <ReceiptDialog date={date} today={today} />
           {/* «التالي» can walk the ledger into tomorrow, but a case cannot be
               opened there — the dialog clamps its own date to today. */}
           <EntryDialog
@@ -127,7 +133,7 @@ export default async function DailyPage({
       </div>
 
       {/* Ledger */}
-      {rows.length === 0 && films.length === 0 ? (
+      {rows.length === 0 && films.length === 0 && unpaidOpened.length === 0 ? (
         <Card data-tour="daily-ledger">
           <CardContent className="text-muted-foreground py-12 text-center text-sm">
             لا توجد تسجيلات في هذا اليوم. اضغط «تسجيل جديد» لإضافة أول دفعة.
@@ -151,7 +157,7 @@ export default async function DailyPage({
                       <span className="text-muted-foreground">·</span>
                       <span>{line.treatment}</span>
                       <Badge variant={kindVariant(line.kind)}>
-                        {PAYMENT_KIND_LABELS[line.kind] ?? line.kind}
+                        {paymentKindLabel(line.kind, line.amount)}
                       </Badge>
                       {line.implantCardNo != null ? (
                         <span className="text-sm">
@@ -222,6 +228,49 @@ export default async function DailyPage({
               </CardContent>
             </Card>
           ))}
+
+          {unpaidOpened.length > 0 ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex flex-wrap items-center gap-2">
+                  بدون دفعة اليوم
+                  <span className="text-muted-foreground text-sm font-normal">
+                    لا تدخل المجموع
+                  </span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="flex flex-col">
+                {unpaidOpened.map((c) => (
+                  <div
+                    key={c.id}
+                    className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 border-b py-2 last:border-b-0"
+                  >
+                    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                      <Link
+                        href={`/patients/${c.patientId}`}
+                        className="font-medium underline-offset-4 hover:underline"
+                      >
+                        {c.patientName}
+                      </Link>
+                      <span className="text-muted-foreground">·</span>
+                      <span>{c.treatment}</span>
+                      <span className="text-muted-foreground text-sm">{c.doctorName}</span>
+                      <Badge variant="secondary">
+                        {c.isOrtho
+                          ? "فتح حالة تقويم"
+                          : c.totalPrice === 0
+                            ? "جلسة مجانية"
+                            : "على الحساب"}
+                      </Badge>
+                    </div>
+                    <span className="money text-muted-foreground shrink-0 text-sm tabular-nums">
+                      {!c.isOrtho && c.remaining > 0 ? `المتبقي ${formatIQD(c.remaining)}` : formatIQD(0)}
+                    </span>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          ) : null}
 
           {/* الأشعة — بلا طبيب وبلا اسم، فلها بطاقتها لا مجموعة طبيب. [D9] */}
           {films.length > 0 ? (

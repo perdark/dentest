@@ -67,7 +67,8 @@ export default async function OrthoCasePage({
   function paymentLabel(p: (typeof payments)[number]): string {
     if (p.kind === "session") {
       const no = sessionNumbers.get(p.id);
-      return no ? `الجلسة ${no}` : "جلسة";
+      const label = no ? `الجلسة ${no}` : "جلسة";
+      return p.amount === 0 ? `${label} — مجانية` : label;
     }
     if (p.kind === "down_payment") return "دفعة من المقدمة";
     return PAYMENT_KIND_LABELS[p.kind] ?? p.kind;

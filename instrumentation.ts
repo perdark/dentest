@@ -7,4 +7,8 @@ export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
   const { ensureDatabase } = await import("./lib/db/bootstrap");
   ensureDatabase();
+  // Off-site copy to Telegram — a no-op unless the packaged app carries
+  // cloud-backup.json (see lib/cloud-backup.ts).
+  const { startCloudBackup } = await import("./lib/cloud-backup");
+  startCloudBackup();
 }

@@ -3,7 +3,7 @@
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { deletePayment, updatePayment, paymentEditFailureMessage } from "@/lib/mutations";
-import { parseAmount } from "@/lib/format";
+import { isExplicitZero, parseAmount } from "@/lib/format";
 import { requireAuth } from "@/lib/auth";
 
 export type VoidState = { ok?: boolean; error?: string };
@@ -67,8 +67,13 @@ export async function updatePaymentAction(
     return { error: parsed.error.issues[0]?.message ?? "تحقّق من البيانات المُدخلة" };
   }
   const d = parsed.data;
+  // صفر يُقبل فقط إذا كُتب صفراً (جلسة مجانية) — لا رقماً تعذّرت قراءته.
+  const amount = parseAmount(d.amount);
+  if (amount === 0 && !isExplicitZero(d.amount)) {
+    return { error: "أدخل مبلغاً صحيحاً" };
+  }
   const result = updatePayment(d.paymentId, {
-    amount: parseAmount(d.amount),
+    amount,
     paidDate: d.paidDate,
     note: d.note || null,
   });

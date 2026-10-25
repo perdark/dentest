@@ -17,7 +17,7 @@ import { formatDateShortY, todayISO } from "@/lib/dates";
 import {
   CASE_STATUS_LABELS,
   ORTHO_BUCKET,
-  PAYMENT_KIND_LABELS,
+  PAYMENT_KIND_LABELS, paymentKindLabel,
   XRAY_BUCKET,
   medicalFlagsLine,
 } from "@/lib/strings";
@@ -483,7 +483,7 @@ export default async function PatientProfilePage({
                     </TableCell>
                     <TableCell>{p.treatment}</TableCell>
                     <TableCell className="hidden sm:table-cell">
-                      {PAYMENT_KIND_LABELS[p.kind] ?? p.kind}
+                      {paymentKindLabel(p.kind, p.amount)}
                     </TableCell>
                     <TableCell className="hidden max-w-56 truncate md:table-cell" title={p.note ?? undefined}>
                       {p.note}

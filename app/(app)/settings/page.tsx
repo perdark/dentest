@@ -14,7 +14,6 @@ export default async function SettingsPage() {
   // Ship only display fields to the client component — never expose the
   // secret columns (pinHash / sessionSecret) in the RSC payload.
   const settings = {
-    clinicName: s.clinicName,
     openingCashBalance: s.openingCashBalance,
     cashReserveThreshold: s.cashReserveThreshold,
     labDeductedPerDoctor: s.labDeductedPerDoctor,

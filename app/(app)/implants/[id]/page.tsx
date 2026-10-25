@@ -5,7 +5,7 @@ import { caseWithDetails, caseRaw, paymentsForCase, patientById } from "@/lib/qu
 import { getSettings } from "@/lib/server-utils";
 import { formatIQD } from "@/lib/format";
 import { formatDateShort, formatDateShortY, todayISO } from "@/lib/dates";
-import { CASE_STATUS_LABELS, PAYMENT_KIND_LABELS } from "@/lib/strings";
+import { CASE_STATUS_LABELS, PAYMENT_KIND_LABELS, paymentKindLabel } from "@/lib/strings";
 import { Badge } from "@/components/ui/badge";
 import { MedicalBadge } from "@/components/ui/medical-badge";
 import { EmptyValue, isBlank } from "@/components/ui/empty-value";
@@ -212,7 +212,7 @@ export default async function ImplantCardPage({
                     </TableCell>
                     <TableCell>
                       <Badge variant="outline">
-                        {PAYMENT_KIND_LABELS[p.kind] ?? p.kind}
+                        {paymentKindLabel(p.kind, p.amount)}
                       </Badge>
                     </TableCell>
                     <TableCell className="money text-start font-semibold tabular-nums">

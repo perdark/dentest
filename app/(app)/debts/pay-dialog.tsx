@@ -120,7 +120,7 @@ export function PayDialog({
               name="amount"
               inputMode="numeric"
               autoComplete="off"
-              placeholder="مثال: 50,000"
+              placeholder={kind === "session" ? "مثال: 50,000 — أو 0 لجلسة مجانية" : "مثال: 50,000"}
               className="h-11 text-base tabular-nums"
               autoFocus
               value={amount}

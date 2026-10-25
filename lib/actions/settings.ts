@@ -27,7 +27,9 @@ function revalidateSettings(): void {
 // بينما رُفض الإدخال بصمت. [D1]
 export type SettingsState = { ok?: boolean; error?: string };
 
-// ── العيادة: الاسم + الرصيد النقدي الافتتاحي ─────────────────────────────────
+// ── الرصيد النقدي الافتتاحي ──────────────────────────────────────────────────
+// «اسم العيادة» أُزيل من الشاشة 2026-10-25 بطلب المطوّر: البرنامج يُقدَّم للعيادة
+// كبرنامج جاهز، لا كعمل مفصّل باسمها. العمود باقٍ في قاعدة البيانات ولا يُكتب.
 export async function updateGeneral(
   _prev: SettingsState,
   formData: FormData,
@@ -35,18 +37,15 @@ export async function updateGeneral(
   await requireAuth();
   const parsed = z
     .object({
-      clinicName: z.string().trim().min(1, "اسم العيادة مطلوب"),
       openingCashBalance: z.string(),
     })
     .safeParse({
-      clinicName: String(formData.get("clinicName") ?? ""),
       openingCashBalance: String(formData.get("openingCashBalance") ?? ""),
     });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "تحقّق من البيانات المُدخلة" };
   }
   updateSettings({
-    clinicName: parsed.data.clinicName,
     // Money = integer dinars, parsed server-side, never negative.
     openingCashBalance: Math.max(0, parseAmount(parsed.data.openingCashBalance)),
   });

@@ -20,6 +20,13 @@ import { SubmitButton } from "@/components/forms/submit-button";
 import { useActionToast } from "@/components/forms/use-action-toast";
 import { FormError } from "@/components/forms/form-error";
 import { MoneySummary } from "@/components/forms/money-summary";
+import {
+  AddDoctorButton,
+  DoctorSharesEditor,
+  newShareRow,
+  unusedDoctorId,
+  type ShareRow,
+} from "@/components/forms/doctor-shares";
 import { ToothMarksPicker } from "@/components/tooth-chart/tooth-marks-picker";
 import { parseAmount } from "@/lib/format";
 import { EARLIEST_RECORD_DATE } from "@/lib/dates";
@@ -55,6 +62,12 @@ export function AddTreatmentDialog({
   history: [number, number][];
   today: string;
 }) {
+  const doctorDefault =
+    defaultDoctorId && doctors.some((d) => d.id === defaultDoctorId)
+      ? String(defaultDoctorId)
+      : doctors[0]
+        ? String(doctors[0].id)
+        : "";
   const [open, setOpen] = useState(false);
   // Remounting the form on every opening clears it, chart included — the
   // next treatment never starts with the last one's teeth ticked.
@@ -62,6 +75,9 @@ export function AddTreatmentDialog({
   const [price, setPrice] = useState("");
   const [discount, setDiscount] = useState("0");
   const [paidNow, setPaidNow] = useState("0");
+  const [doctorId, setDoctorId] = useState(doctorDefault);
+  // null = one doctor (the form as it always was); 2+ rows = a shared treatment.
+  const [shares, setShares] = useState<ShareRow[] | null>(null);
   const [state, formAction] = useActionState<PatientTreatmentState, FormData>(
     addPatientTreatmentAction,
     {},
@@ -74,6 +90,8 @@ export function AddTreatmentDialog({
       setPrice("");
       setDiscount("0");
       setPaidNow("0");
+      setDoctorId(doctorDefault);
+      setShares(null);
     }
   }
 
@@ -81,12 +99,20 @@ export function AddTreatmentDialog({
 
   const net = Math.max(0, parseAmount(price) - parseAmount(discount));
   const remaining = net - parseAmount(paidNow);
-  const doctorDefault =
-    defaultDoctorId && doctors.some((d) => d.id === defaultDoctorId)
-      ? String(defaultDoctorId)
-      : doctors[0]
-        ? String(doctors[0].id)
-        : "";
+
+  function shareWithAnotherDoctor() {
+    // What was already typed becomes the first doctor's share — net of any
+    // discount, because a shared treatment is split as net shares.
+    const first = newShareRow(doctorId, price.trim() ? String(net) : "", paidNow);
+    setShares([first, newShareRow(unusedDoctorId(doctors, [first]))]);
+  }
+  function backToOneDoctor(last: ShareRow) {
+    setShares(null);
+    setDoctorId(last.doctorId);
+    setPrice(last.price);
+    setDiscount("0");
+    setPaidNow(last.paid);
+  }
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -128,17 +154,25 @@ export function AddTreatmentDialog({
                 </datalist>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-2">
-                  <Label htmlFor="pt-doctor">الطبيب</Label>
-                  <NativeSelect id="pt-doctor" name="doctorId" required defaultValue={doctorDefault}>
-                    {doctors.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.name}
-                      </option>
-                    ))}
-                  </NativeSelect>
-                </div>
+              <div className={shares ? "space-y-3" : "grid grid-cols-2 gap-3"}>
+                {shares ? null : (
+                  <div className="space-y-2">
+                    <Label htmlFor="pt-doctor">الطبيب</Label>
+                    <NativeSelect
+                      id="pt-doctor"
+                      name="doctorId"
+                      required
+                      value={doctorId}
+                      onChange={(e) => setDoctorId(e.target.value)}
+                    >
+                      {doctors.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.name}
+                        </option>
+                      ))}
+                    </NativeSelect>
+                  </div>
+                )}
                 <div className="space-y-2">
                   <Label htmlFor="pt-date">التاريخ</Label>
                   <Input
@@ -154,52 +188,67 @@ export function AddTreatmentDialog({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-2">
-                  <Label htmlFor="pt-price">السعر</Label>
-                  <Input
-                    id="pt-price"
-                    name="price"
-                    inputMode="numeric"
-                    className="h-11 text-base tabular-nums"
-                    placeholder="0"
-                    value={price}
-                    onChange={(e) => setPrice(e.target.value)}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="pt-discount">الخصم</Label>
-                  <Input
-                    id="pt-discount"
-                    name="discount"
-                    inputMode="numeric"
-                    className="h-11 text-base tabular-nums"
-                    value={discount}
-                    onChange={(e) => setDiscount(e.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="pt-paid">المبلغ المدفوع</Label>
-                <Input
-                  id="pt-paid"
-                  name="paidNow"
-                  inputMode="numeric"
-                  className="h-11 text-base tabular-nums"
-                  value={paidNow}
-                  onChange={(e) => setPaidNow(e.target.value)}
+              {/* علاج واحد يشترك فيه أكثر من طبيب: لكل طبيب حصته من السعر ومن
+                  المدفوع، وتُحفظ لكل منهم حالة خاصة به. */}
+              {shares ? (
+                <DoctorSharesEditor
+                  idPrefix="pt"
+                  doctors={doctors}
+                  rows={shares}
+                  onChange={setShares}
+                  onCollapse={backToOneDoctor}
                 />
-              </div>
+              ) : (
+                <>
+                  {doctors.length > 1 ? <AddDoctorButton onClick={shareWithAnotherDoctor} /> : null}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <Label htmlFor="pt-price">السعر</Label>
+                      <Input
+                        id="pt-price"
+                        name="price"
+                        inputMode="numeric"
+                        className="h-11 text-base tabular-nums"
+                        placeholder="0"
+                        value={price}
+                        onChange={(e) => setPrice(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="pt-discount">الخصم</Label>
+                      <Input
+                        id="pt-discount"
+                        name="discount"
+                        inputMode="numeric"
+                        className="h-11 text-base tabular-nums"
+                        value={discount}
+                        onChange={(e) => setDiscount(e.target.value)}
+                      />
+                    </div>
+                  </div>
 
-              {price.trim() ? (
-                <MoneySummary
-                  figures={[
-                    { label: "الصافي", amount: net },
-                    { label: "المتبقي", amount: remaining, emphasis: true },
-                  ]}
-                />
-              ) : null}
+                  <div className="space-y-2">
+                    <Label htmlFor="pt-paid">المبلغ المدفوع</Label>
+                    <Input
+                      id="pt-paid"
+                      name="paidNow"
+                      inputMode="numeric"
+                      className="h-11 text-base tabular-nums"
+                      value={paidNow}
+                      onChange={(e) => setPaidNow(e.target.value)}
+                    />
+                  </div>
+
+                  {price.trim() ? (
+                    <MoneySummary
+                      figures={[
+                        { label: "الصافي", amount: net },
+                        { label: "المتبقي", amount: remaining, emphasis: true },
+                      ]}
+                    />
+                  ) : null}
+                </>
+              )}
 
               <div className="space-y-2">
                 <Label htmlFor="pt-notes">ملاحظات (اختياري)</Label>

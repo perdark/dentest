@@ -107,6 +107,37 @@ if (seedDb) {
   );
 }
 
+// 3c. The CLINIC bundle only: where the daily sealed backup goes (lib/cloud-backup.ts).
+//
+//     Read from .env.local, which git ignores — the repo is public. The demo
+//     bundle never gets it: demo money has no business in the developer's
+//     backup chat. Missing keys only switch the feature off; the build still
+//     succeeds, with a warning, so a local test package needs no secrets.
+if (!seedDb) {
+  const envFile = path.join(root, ".env.local");
+  const env = Object.fromEntries(
+    (fs.existsSync(envFile) ? fs.readFileSync(envFile, "utf8") : "")
+      .split(/\r?\n/)
+      .flatMap((line) => {
+        const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/.exec(line);
+        return m ? [[m[1], m[2].replace(/^["']|["']$/g, "")]] : [];
+      }),
+  );
+  const cloud = {
+    token: env.ZUHA_TG_TOKEN,
+    chatId: env.ZUHA_TG_CHAT,
+    publicKey: env.ZUHA_BACKUP_PUBLIC_KEY,
+  };
+  if (cloud.token && cloud.chatId && cloud.publicKey) {
+    fs.writeFileSync(path.join(out, "cloud-backup.json"), JSON.stringify(cloud));
+    console.log("→ Telegram backup configured");
+  } else {
+    console.warn(
+      "⚠ Telegram backup OFF — .env.local needs ZUHA_TG_TOKEN, ZUHA_TG_CHAT, ZUHA_BACKUP_PUBLIC_KEY",
+    );
+  }
+}
+
 // 4. Drop image-optimisation binaries: this app renders no <Image>, and
 //    sharp + @img is ~33 MB of platform-specific native code.
 for (const dead of ["@img", "sharp"]) {

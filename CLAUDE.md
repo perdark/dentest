@@ -47,6 +47,19 @@ Next.js 16 (App Router, RSC, server actions) · TypeScript · Tailwind v4 · sha
   small `scripts/*.mjs` runner instead (`run-tsx.mjs`, `run-verify.mjs`, `e2e-server.mjs`,
   `stage-app.mjs` — the last takes `--platform=`/`--arch=`/`--seed-db=` flags). Plain `cmd && cmd`
   chains are fine.
+- **Remote updates (2026-10-25):** the clinic build is an NSIS installer that updates itself
+  from GitHub Releases on `perdark/dentest` (`electron/updater.js`, bundled by
+  `npm run bundle:updater`): checks when online, downloads silently, installs on quit. To ship:
+  bump `version`, then `npm run release:win` with `GH_TOKEN` in the environment (publishes the
+  release). `npm run dist:win` builds the same installer without publishing. The first launch of
+  each new version snapshots the DB into `backups/` before migrating (`snapshotOnVersionChange`
+  in `lib/db/bootstrap.ts`). The demo stays a zip and never updates.
+- **Telegram backup (developer-only, no UI):** `lib/cloud-backup.ts` sends a sealed DB daily when
+  online. `stage-app.mjs` writes `cloud-backup.json` from `.env.local` (`ZUHA_TG_TOKEN`,
+  `ZUHA_TG_CHAT`, `ZUHA_BACKUP_PUBLIC_KEY`); missing keys = feature off. Backups are sealed to a
+  public key because the token ships inside a public installer. `npm run backup:keygen -- <pem>`
+  once; `npm run backup:open -- <file.zbak> <pem>` to get a `.db` back. Private key lives in
+  `~/Desktop/_private/` and nowhere else.
 - Backup: the **الإعدادات** page has a one-click button (writes `backups/zuha-<timestamp>.db`).
 - Restore: same page, «استعادة نسخة محفوظة». It **stages** the file and the swap happens on the
   next start (`applyPendingRestore()` in `lib/paths.ts`, called before the connection opens) —

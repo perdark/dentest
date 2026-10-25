@@ -1,6 +1,6 @@
 import { requireAuth } from "@/lib/auth";
-import { getSettings, cashOnHand } from "@/lib/server-utils";
-import { hasAnyRecords } from "@/lib/queries";
+import { getSettings } from "@/lib/server-utils";
+import { hasAnyRecords, monthCollectedTotal } from "@/lib/queries";
 import { AppShell } from "@/components/app-shell";
 
 export default async function AppLayout({
@@ -23,8 +23,7 @@ export default async function AppLayout({
   }
   return (
     <AppShell
-      clinicName={settings.clinicName}
-      cashOnHand={cashOnHand()}
+      monthCollected={monthCollectedTotal()}
       // A demo install and an empty one are both "nobody has worked here yet",
       // which is exactly when an unprompted walkthrough helps rather than
       // interrupts.

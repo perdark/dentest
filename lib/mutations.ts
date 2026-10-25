@@ -468,7 +468,12 @@ function insertPayment(
  */
 export const recordCasePayment = sqlite.transaction(
   (input: NewPaymentInput): PaymentResult => {
-    if (!Number.isSafeInteger(input.amount) || input.amount <= 0) {
+    // صفر مقبول لـ«جلسة» وحدها: جلسة مجانية — المريض حضر والعيادة لم تأخذ
+    // شيئاً. تُسجَّل سطراً بصفر كي تظهر في الدفتر وملف المريض، ولا تغيّر أي
+    // مجموع ولا حصة. المقدمة والاسترجاع بصفر لا معنى لهما. [قرار العيادة 2026-10-22]
+    const kindIn = input.kind ?? "session";
+    const minAmount = kindIn === "session" ? 0 : 1;
+    if (!Number.isSafeInteger(input.amount) || input.amount < minAmount) {
       return { ok: false, reason: "invalid_amount" };
     }
     if (!isValidISODate(input.paidDate)) {
@@ -834,6 +839,113 @@ export function createCaseWithTeeth(
     })();
   } catch (e) {
     if (e instanceof ToothChartRejected) return { ok: false, reason: e.reason };
+    throw e;
+  }
+}
+
+/**
+ * علاج واحد يشترك فيه أكثر من طبيب — والسكرتيرة تقرّر القسمة. [2026-10-25]
+ *
+ * There is no "shared case" in the books: each doctor gets an ordinary case of
+ * their own (same patient, same treatment, same day), with their own share of
+ * the price and their own share of the first payment. Everything downstream —
+ * the settlement (payments credit `case.doctorId`), balances, D4 staleness, the
+ * audit log, implant numbering — therefore sees N normal cases and needs no
+ * change. Each share goes through `createCaseWithPayment`, the same path a
+ * single-doctor save takes, so a share that would be refused on its own is
+ * refused here. All shares are written in ONE transaction: one bad share and
+ * nothing is saved, so the clerk can never fix the form and save half of the
+ * treatment twice.
+ *
+ * Totals are computed here (`listPrice - discount`), never taken from a form.
+ * The chart, when given, is set on every share: each doctor's case is a full
+ * record of the treatment on the patient's file.
+ */
+export type CaseShareInput = {
+  doctorId: number;
+  listPrice: number;
+  discount?: number;
+  paidNow: number;
+};
+
+export type SharedCaseFailure =
+  | "no_shares"
+  | "duplicate_doctor"
+  | "invalid_amount"
+  | "discount_exceeds_price"
+  | "paid_exceeds_price"
+  | ToothMarkFailure;
+
+export function sharedCaseFailureMessage(reason: SharedCaseFailure): string {
+  switch (reason) {
+    case "no_shares":
+      return "اختر الطبيب";
+    case "duplicate_doctor":
+      return "الطبيب نفسه مكرّر — اختر لكل سطر طبيباً مختلفاً";
+    case "invalid_amount":
+      return "المبالغ يجب أن تكون موجبة";
+    case "discount_exceeds_price":
+      return "الخصم أكبر من السعر";
+    case "paid_exceeds_price":
+      return "المدفوع من أحد الأطباء أكبر من حصته من السعر";
+    default:
+      return toothMarkFailureMessage(reason);
+  }
+}
+
+class SharedCaseRejected extends Error {
+  constructor(readonly reason: SharedCaseFailure) {
+    super(reason);
+  }
+}
+
+export function createSharedCases(
+  input: Omit<NewCaseInput, "doctorId" | "listPrice" | "discount" | "totalPrice"> & {
+    shares: CaseShareInput[];
+    marks?: ToothMarkInput[];
+  },
+): { ok: true; caseIds: number[] } | { ok: false; reason: SharedCaseFailure } {
+  const { shares, marks = [], ...common } = input;
+  if (shares.length === 0) return { ok: false, reason: "no_shares" };
+  const seen = new Set<number>();
+  for (const s of shares) {
+    if (seen.has(s.doctorId)) return { ok: false, reason: "duplicate_doctor" };
+    seen.add(s.doctorId);
+    const discount = s.discount ?? 0;
+    if (
+      !Number.isSafeInteger(s.doctorId) ||
+      s.doctorId <= 0 ||
+      ![s.listPrice, discount, s.paidNow].every((n) => Number.isSafeInteger(n) && n >= 0)
+    ) {
+      return { ok: false, reason: "invalid_amount" };
+    }
+    if (discount > s.listPrice) return { ok: false, reason: "discount_exceeds_price" };
+    if (s.paidNow > s.listPrice - discount) return { ok: false, reason: "paid_exceeds_price" };
+  }
+
+  try {
+    return atomicMutation(() => {
+      const caseIds: number[] = [];
+      for (const s of shares) {
+        const discount = s.discount ?? 0;
+        const { caseId } = createCaseWithPayment({
+          ...common,
+          doctorId: s.doctorId,
+          listPrice: s.listPrice,
+          discount,
+          totalPrice: s.listPrice - discount,
+          firstPayment: s.paidNow > 0 ? { amount: s.paidNow, kind: "down_payment" } : undefined,
+        });
+        if (marks.length > 0) {
+          const teeth = setCaseTeeth(caseId, marks);
+          if (!teeth.ok) throw new SharedCaseRejected(teeth.reason);
+        }
+        caseIds.push(caseId);
+      }
+      return { ok: true as const, caseIds };
+    })();
+  } catch (e) {
+    if (e instanceof SharedCaseRejected) return { ok: false, reason: e.reason };
     throw e;
   }
 }
@@ -1227,7 +1339,7 @@ export const updatePayment = sqlite.transaction(
     id: number,
     input: { amount: number; paidDate: string; note: string | null },
   ): { ok: true } | { ok: false; reason: PaymentEditFailure } => {
-    if (!Number.isSafeInteger(input.amount) || input.amount <= 0) {
+    if (!Number.isSafeInteger(input.amount) || input.amount < 0) {
       return { ok: false, reason: "invalid_amount" };
     }
     if (!isValidISODate(input.paidDate)) return { ok: false, reason: "invalid_date" };
@@ -1235,6 +1347,10 @@ export const updatePayment = sqlite.transaction(
 
     const before = db.select().from(payments).where(eq(payments.id, id)).get();
     if (!before) return { ok: false, reason: "not_found" };
+    // صفر لـ«جلسة» فقط (جلسة مجانية)، كما في `recordCasePayment`.
+    if (input.amount === 0 && before.kind !== "session") {
+      return { ok: false, reason: "invalid_amount" };
+    }
     const treatmentCase = db.select().from(cases).where(eq(cases.id, before.caseId)).get();
     if (!treatmentCase) return { ok: false, reason: "not_found" };
 

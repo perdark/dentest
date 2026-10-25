@@ -3,9 +3,10 @@
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { paymentFailureMessage, recordCasePayment } from "@/lib/mutations";
-import { parseAmount } from "@/lib/format";
+import { isExplicitZero, parseAmount } from "@/lib/format";
 import { todayISO, isRecordableDate } from "@/lib/dates";
 import { requireAuth } from "@/lib/auth";
+import { collectableCasesForPatient } from "@/lib/queries";
 
 export type PayState = { ok?: boolean; error?: string };
 
@@ -48,9 +49,17 @@ export async function recordDebtPayment(
   const d = parsed.data;
 
   // المبلغ يُحسب على الخادم — لا نثق بأي قيمة محسوبة في المتصفّح.
-  const amount = Math.max(0, parseAmount(d.amount));
-  if (amount <= 0) {
-    return { error: "أدخل مبلغاً صحيحاً أكبر من صفر" };
+  // صفر مكتوب صراحةً على «جلسة» = جلسة مجانية: تُسجَّل ولا تغيّر أي رصيد.
+  // [قرار العيادة 2026-10-22]
+  const amount = parseAmount(d.amount);
+  const free = d.kind === "session" && isExplicitZero(d.amount);
+  if (!free && amount <= 0) {
+    return {
+      error:
+        d.kind === "session"
+          ? "أدخل مبلغاً صحيحاً — أو 0 لجلسة مجانية"
+          : "أدخل مبلغاً صحيحاً أكبر من صفر",
+    };
   }
   // Coerced to today rather than refused, unlike `createVisitNewCase` which
   // errors on the same input. The difference is what the field means: there the
@@ -77,5 +86,35 @@ export async function recordDebtPayment(
   revalidatePath("/patients/[id]", "page");
   // الحوار نفسه يُفتح من بطاقة الزراعة أيضاً (بدل «إضافة جلسة» القديم). [2026-09-27]
   revalidatePath("/implants", "layout");
+  revalidatePath("/ortho", "layout");
   return { ok: true };
+}
+
+// ── استلام مبلغ: الحالات التي تقبل دفعة لمريض واحد ──────────────────────────
+export type CollectableCase = {
+  id: number;
+  treatment: string;
+  doctorName: string;
+  openedDate: string;
+  isOrtho: boolean;
+  remaining: number;
+};
+
+/**
+ * What «استلام مبلغ» in «الدفتر اليومي» offers once a patient is picked. The
+ * payment itself is then `recordDebtPayment` — the same path as «الديون ←
+ * إضافة دفعة», so the caps, the doctor credit and the audit row are identical
+ * whichever screen took the money. [2026-10-22]
+ */
+export async function collectableCasesAction(patientId: number): Promise<CollectableCase[]> {
+  await requireAuth();
+  if (!Number.isSafeInteger(patientId) || patientId <= 0) return [];
+  return collectableCasesForPatient(patientId).map((c) => ({
+    id: c.id,
+    treatment: c.treatment,
+    doctorName: c.doctorName,
+    openedDate: c.openedDate,
+    isOrtho: c.isOrtho,
+    remaining: c.remaining,
+  }));
 }

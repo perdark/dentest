@@ -22,7 +22,11 @@ module.exports = {
   // entry and the wrong readme shipped inside resources/app/electron/.
   win: {
     ...base.win,
+    // The demo stays a portable zip and never updates itself: an update feed
+    // would install the clinic build over it (electron/updater.js skips demo).
+    target: [{ target: "zip", arch: ["x64"] }],
     artifactName: "Zuha-${version}-win-x64-demo.${ext}",
   },
+  publish: null,
   extraFiles: [{ from: "electron/اقرأني-تجريبي.txt", to: "اقرأني.txt" }],
 };

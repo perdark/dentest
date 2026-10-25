@@ -1,0 +1,55 @@
+# Build the clinic's Windows installer and publish it as a GitHub Release.
+#
+# The NSIS installer cannot be built on the Linux dev laptop without wine, and
+# the installed app updates itself from this repo's Releases
+# (electron/updater.js). Push a tag `v<version>` matching package.json to ship:
+#
+#   git tag v2.4.0 && git push origin v2.4.0
+#
+# Telegram backup keys come from repository secrets (ZUHA_TG_TOKEN,
+# ZUHA_TG_CHAT, ZUHA_BACKUP_PUBLIC_KEY) — never from the repo, which is public.
+# Missing secrets only switch the backup off (scripts/stage-app.mjs).
+name: release-win
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Backup config from secrets
+        shell: bash
+        env:
+          ZUHA_TG_TOKEN: ${{ secrets.ZUHA_TG_TOKEN }}
+          ZUHA_TG_CHAT: ${{ secrets.ZUHA_TG_CHAT }}
+          ZUHA_BACKUP_PUBLIC_KEY: ${{ secrets.ZUHA_BACKUP_PUBLIC_KEY }}
+        run: |
+          {
+            echo "ZUHA_TG_TOKEN=$ZUHA_TG_TOKEN"
+            echo "ZUHA_TG_CHAT=$ZUHA_TG_CHAT"
+            echo "ZUHA_BACKUP_PUBLIC_KEY=$ZUHA_BACKUP_PUBLIC_KEY"
+          } > .env.local
+
+      - run: npm run build
+      - run: npm run stage:win
+      - run: npm run bundle:updater
+
+      - name: Package and publish
+        run: npx electron-builder --win --x64 --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -164,6 +164,12 @@ export const PAYMENT_KIND_LABELS: Record<string, string> = {
   adjustment: "تسوية",
 };
 
+/** The label a recorded line reads under: a «جلسة» at 0 is a free session. */
+export function paymentKindLabel(kind: string, amount: number): string {
+  if (kind === "session" && amount === 0) return "جلسة مجانية";
+  return PAYMENT_KIND_LABELS[kind] ?? kind;
+}
+
 export const CASE_STATUS_LABELS: Record<string, string> = {
   open: "مفتوح",
   completed: "مكتمل",

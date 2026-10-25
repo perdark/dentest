@@ -334,3 +334,31 @@ test("a first payment cannot create an already-overpaid case", () => {
     .get()!.value;
   assert.equal(countAfter, countBefore);
 });
+
+// ── جلسة مجانية [قرار العيادة 2026-10-22] ─────────────────────────────────────
+test("a session at 0 is a free session: recorded, but moves no balance", () => {
+  const caseId = createCase(1_000);
+  const free = recordCasePayment({ caseId, amount: 0, kind: "session", paidDate: todayISO() });
+  assert.equal(free.ok, true);
+  if (free.ok) {
+    assert.equal(free.amount, 0);
+    assert.equal(free.remaining, 1_000);
+  }
+  // Also on a case with nothing left to pay — a follow-up visit after the work is paid.
+  const paidUp = createCase(500);
+  assert.equal(recordCasePayment({ caseId: paidUp, amount: 500, paidDate: todayISO() }).ok, true);
+  assert.equal(
+    recordCasePayment({ caseId: paidUp, amount: 0, kind: "session", paidDate: todayISO() }).ok,
+    true,
+  );
+});
+
+test("0 is refused for a down payment or a refund, and negatives always", () => {
+  const caseId = createCase(1_000);
+  for (const kind of ["down_payment", "refund"] as const) {
+    const r = recordCasePayment({ caseId, amount: 0, kind, paidDate: todayISO() });
+    assert.deepEqual(r, { ok: false, reason: "invalid_amount" });
+  }
+  const neg = recordCasePayment({ caseId, amount: -5, kind: "session", paidDate: todayISO() });
+  assert.deepEqual(neg, { ok: false, reason: "invalid_amount" });
+});

@@ -60,7 +60,7 @@ export function OrthoPaymentForm({
             inputMode="numeric"
             required
             className="h-11 text-base tabular-nums"
-            placeholder="مثال: 100,000"
+            placeholder="مثال: 100,000 — أو 0 لجلسة مجانية"
             aria-invalid={Boolean(state.error)}
             value={amount}
             onChange={(e) => setAmount(e.target.value)}

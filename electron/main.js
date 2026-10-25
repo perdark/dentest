@@ -18,6 +18,7 @@ const http = require("node:http");
 const net = require("node:net");
 const path = require("node:path");
 const fs = require("node:fs");
+const { startAutoUpdate } = require("./updater");
 
 const isDev = !app.isPackaged;
 const appRoot = isDev
@@ -28,6 +29,7 @@ let serverProcess = null;
 let mainWindow = null;
 let serverPort = 0;
 let shuttingDown = false;
+let isDemo = false;
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
@@ -191,7 +193,8 @@ async function startServer() {
   // On the demo bundle, stop here: pulling a clinic's REAL «دِنتِست» records
   // into a demo copy would both mislead whoever is being shown the system and
   // put live patient data somewhere nobody expects it to be.
-  if (!installSeedDatabase(dataDir)) {
+  isDemo = installSeedDatabase(dataDir);
+  if (!isDemo) {
     adoptLegacyUserData(dataDir);
   }
 
@@ -212,6 +215,7 @@ async function startServer() {
       PORT: String(serverPort),
       ZUHA_DATA_DIR: dataDir,
       ZUHA_MIGRATIONS_DIR: path.join(appRoot, "drizzle"),
+      ZUHA_APP_VERSION: app.getVersion(),
       ZUHA_QUIET: "1",
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -364,6 +368,7 @@ if (!app.requestSingleInstanceLock()) {
       buildMenu();
       await startServer();
       createWindow();
+      startAutoUpdate({ app, isDemo });
     } catch (err) {
       fatal("تعذّر تشغيل النظام", String((err && err.message) || err));
     }

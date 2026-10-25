@@ -22,7 +22,7 @@ export function formatNumber(amount: number | null | undefined): string {
 export function parseAmount(input: string | number | null | undefined): number {
   if (input == null) return 0;
   if (typeof input === "number") return Math.round(input);
-  let s = String(input).trim().replace(/[,٬\s]/g, "").replace(/د\.?ع/g, "");
+  let s = normalizeDigits(String(input)).trim().replace(/[,٬\s]/g, "").replace(/د\.?ع/g, "");
   if (!s) return 0;
   let mult = 1;
   const m = s.match(/([0-9.]+)\s*([mMkK])$/);
@@ -33,4 +33,23 @@ export function parseAmount(input: string | number | null | undefined): number {
   const v = Number(s);
   if (!Number.isFinite(v)) return 0;
   return Math.round(v * mult);
+}
+
+/** «٠١٢٣٤٥٦٧٨٩» / «۰۱۲…» → ASCII, so an Arabic keyboard types real amounts. */
+function normalizeDigits(s: string): string {
+  return s
+    .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+    .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0));
+}
+
+/**
+ * True only when the clerk actually typed zero («0», «٠», «0 د.ع»).
+ *
+ * `parseAmount` answers 0 for anything it cannot read, so «0» alone cannot
+ * tell a free session from a typo. A free session is recorded only on this.
+ */
+export function isExplicitZero(input: string | null | undefined): boolean {
+  if (input == null) return false;
+  const s = normalizeDigits(String(input)).trim().replace(/[,٬\s]/g, "").replace(/د\.?ع/g, "");
+  return /^0+$/.test(s);
 }
