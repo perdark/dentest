@@ -354,7 +354,13 @@ export const monthlySettlements = sqliteTable(
     accruedTotal: integer("accrued_total").notNull().default(0),
     labCost: integer("lab_cost").notNull().default(0),
     commissionPct: integer("commission_pct"), // snapshot at close [D3]
+    // What the doctor is handed. Since 2026-10-28 this is NET of his
+    // assistants: `grossPayout` is his share before them, `assistantsTotal`
+    // what they took from it. Rows closed before then carry gross = payout
+    // (backfilled by migration 0011) and assistantsTotal = 0.
     payout: integer("payout").notNull().default(0),
+    grossPayout: integer("gross_payout").notNull().default(0),
+    assistantsTotal: integer("assistants_total").notNull().default(0),
     status: text("status", { enum: ["draft", "closed", "stale"] })
       .notNull()
       .default("draft"), // [D4]
@@ -368,6 +374,63 @@ export const monthlySettlements = sqliteTable(
   (t) => [uniqueIndex("settlement_period_doctor_idx").on(t.period, t.doctorId)],
 );
 
+// ── Assistants (مساعدو الأطباء) [2026-10-28] ────────────────────────────────
+/**
+ * A doctor's assistant, paid OUT OF THAT DOCTOR'S SHARE — the clinic's rule for
+ * both pay modes [قرار العيادة 2026-10-28]:
+ *  - `salary`: a fixed monthly amount taken from the doctor's share.
+ *  - `percent`: `pct`% of the doctor's share (after his own %), taken from it.
+ *
+ * An assistant counts in every month from `startDate`'s month through
+ * `endDate`'s month (open-ended while `endDate` is NULL). Dates, not an active
+ * flag, so re-reading an old unclosed month still charges who worked then.
+ */
+export const assistants = sqliteTable(
+  "assistants",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    name: text("name").notNull(),
+    doctorId: integer("doctor_id")
+      .notNull()
+      .references(() => doctors.id),
+    payMode: text("pay_mode", { enum: ["salary", "percent"] }).notNull(),
+    salary: integer("salary").notNull().default(0), // IQD/month, salary mode
+    pct: integer("pct").notNull().default(0), // 0-100, percent mode
+    startDate: text("start_date").notNull(), // YYYY-MM-DD
+    endDate: text("end_date"), // YYYY-MM-DD; NULL = still working
+    notes: text("notes"),
+    createdAt: ts(),
+  },
+  (t) => [index("assistants_doctor_idx").on(t.doctorId)],
+);
+
+/** Frozen assistant pay per month — written with the doctors' rows on close. */
+export const assistantSettlements = sqliteTable(
+  "assistant_settlements",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    period: text("period").notNull(), // YYYY-MM
+    assistantId: integer("assistant_id")
+      .notNull()
+      .references(() => assistants.id),
+    doctorId: integer("doctor_id")
+      .notNull()
+      .references(() => doctors.id),
+    payMode: text("pay_mode", { enum: ["salary", "percent"] }).notNull(),
+    pct: integer("pct").notNull().default(0),
+    salary: integer("salary").notNull().default(0),
+    amount: integer("amount").notNull().default(0),
+    status: text("status", { enum: ["draft", "closed"] }).notNull().default("draft"),
+    closedAt: integer("closed_at"),
+    paidAt: integer("paid_at"),
+    createdAt: ts(),
+    updatedAt: integer("updated_at").default(sql`(unixepoch() * 1000)`),
+  },
+  (t) => [
+    uniqueIndex("assistant_settlement_period_idx").on(t.period, t.assistantId),
+  ],
+);
+
 // ── Settings (single row id=1) ──────────────────────────────────────────────
 export const settings = sqliteTable("settings", {
   id: integer("id").primaryKey().default(1),
@@ -376,6 +439,11 @@ export const settings = sqliteTable("settings", {
   sessionSecret: text("session_secret"),
   currency: text("currency").notNull().default("IQD"),
   openingCashBalance: integer("opening_cash_balance").notNull().default(0),
+  // «النقد المتوفر» counts from this day: `openingCashBalance` is what was in
+  // the drawer that morning, and nothing dated earlier is added. NULL = every
+  // record ever (the original rule). Without it, every old payment typed in
+  // from the paper notebooks read as cash still in the drawer. [2026-10-28]
+  cashStartDate: text("cash_start_date"),
   // ── UNCONFIRMED knobs (Layer 2) — defaults marked for clinic verification ──
   cashReserveThreshold: integer("cash_reserve_threshold").notNull().default(5000000),
   labDeductedPerDoctor: integer("lab_deducted_per_doctor", { mode: "boolean" })
@@ -470,6 +538,8 @@ export type Case = typeof cases.$inferSelect;
 export type Payment = typeof payments.$inferSelect;
 export type Expense = typeof expenses.$inferSelect;
 export type MonthlySettlement = typeof monthlySettlements.$inferSelect;
+export type Assistant = typeof assistants.$inferSelect;
+export type AssistantSettlement = typeof assistantSettlements.$inferSelect;
 export type Settings = typeof settings.$inferSelect;
 export type CaseTooth = typeof caseTeeth.$inferSelect;
 export type XrayFilm = typeof xrayFilms.$inferSelect;

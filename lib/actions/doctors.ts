@@ -155,6 +155,7 @@ export async function removeDoctor(
     if (refs.appointments) parts.push(`${refs.appointments} موعد`);
     if (refs.labEntries) parts.push(`${refs.labEntries} تسجيل مختبر`);
     if (refs.settlements) parts.push(`${refs.settlements} حصيلة شهرية`);
+    if (refs.assistants) parts.push(`${refs.assistants} مساعد`);
     return {
       error: `ما ينحذف — مربوط بـ${parts.join(" · ")}. حذفه يتّم هذي السجلات. استعمل «موقوف» بدله.`,
     };

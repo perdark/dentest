@@ -7,6 +7,7 @@ import {
   computeSettlement,
   reopenSettlement,
   finalizeSettlementPayout,
+  finalizeAssistantPayout,
 } from "@/lib/settlement";
 import { requireAuth } from "@/lib/auth";
 import { todayISO, isRecordableDate } from "@/lib/dates";
@@ -102,5 +103,44 @@ export async function markPaid(
   }
 
   revalidateSettlement();
+  return { ok: true };
+}
+
+// ── صرف أجر مساعد (حركة نقدية صادرة) [2026-10-28] ────────────────────────────
+const assistantPaySchema = z.object({
+  period: z.string().regex(PERIOD_RE, "شهر غير صالح"),
+  assistantId: z.coerce.number().int().positive(),
+  date: z.string().optional().default(""),
+});
+
+export async function markAssistantPaid(
+  _prev: PayoutState,
+  formData: FormData,
+): Promise<PayoutState> {
+  await requireAuth();
+  const parsed = assistantPaySchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "تحقّق من البيانات المُدخلة" };
+  }
+  const d = parsed.data;
+  const date = isRecordableDate(d.date) ? d.date : todayISO();
+  const result = finalizeAssistantPayout({
+    period: d.period,
+    assistantId: d.assistantId,
+    paidDate: date,
+  });
+  if (!result.ok) {
+    const errors = {
+      not_found: "لم يتم العثور على أجر المساعد لهذا الشهر.",
+      not_closed: "يجب إقفال الشهر قبل الصرف.",
+      doctor_not_closed: "تغيّرت حصيلة طبيبه بعد الإقفال — أعد إقفال الشهر أولاً.",
+      already_paid: "تم صرف هذا الأجر مسبقاً.",
+      non_positive: "لا يوجد أجر موجب قابل للصرف.",
+    } satisfies Record<typeof result.reason, string>;
+    return { error: errors[result.reason] };
+  }
+  revalidateSettlement();
+  revalidatePath("/assistants");
+  revalidatePath("/cash");
   return { ok: true };
 }

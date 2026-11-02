@@ -14,11 +14,13 @@ import {
   labEntries,
   xrayFilms,
   caseTeeth,
+  assistants,
 } from "@/lib/db/schema";
 import { getTooth, type Surface } from "@/lib/db/teeth";
 import { cashOnHand, getSettings } from "@/lib/server-utils";
 import { currentPeriod, shiftISOByDays, todayISO } from "@/lib/dates";
 import { ORTHO_BUCKET, XRAY_BUCKET } from "@/lib/strings";
+import { normalizeArabic } from "@/lib/arabic";
 
 /**
  * The appointment status column is a union, so a filter arriving as a raw query
@@ -81,6 +83,27 @@ export function listDoctors(
    * which is also what makes this safe to ship to a clinic mid-use.
    */
   return matching.length > 0 ? matching : active;
+}
+
+// ── المساعدون [2026-10-28] ──────────────────────────────────────────────────
+/**
+ * Every assistant with his doctor's name — still working first, then by
+ * doctor. «يعمل» means no stop date, or one that has not come yet.
+ */
+export function assistantsList() {
+  const today = todayISO();
+  return db
+    .select({
+      ...getTableColumns(assistants),
+      doctorName: doctors.name,
+      doctorIsOwner: doctors.isOwner,
+    })
+    .from(assistants)
+    .innerJoin(doctors, eq(assistants.doctorId, doctors.id))
+    .orderBy(doctors.sortOrder, assistants.name)
+    .all()
+    .map((a) => ({ ...a, working: a.endDate === null || a.endDate >= today }))
+    .sort((a, b) => Number(b.working) - Number(a.working));
 }
 
 /**
@@ -167,8 +190,12 @@ export function patientsList(opts: PatientsListOptions = {}, limit = 50) {
 
   if (q) {
     const term = `%${q}%`;
+    // The name is matched in its folded form, so «سبا فائق» finds «سبأ فائق»
+    // and the clerk picks the existing file instead of opening a second one
+    // for the same patient. [2026-10-28]
+    const nameTerm = `%${normalizeArabic(q)}%`;
     conditions.push(
-      sql`(${patients.fullName} like ${term} or ${patients.phone} like ${term})`,
+      sql`(ar_norm(${patients.fullName}) like ${nameTerm} or ${patients.phone} like ${term})`,
     );
   }
 

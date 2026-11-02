@@ -35,6 +35,10 @@ const SCREENS: readonly Screen[] = [
   { path: "/appointments", landmark: '[data-tour="appt-list"]' },
   { path: "/doctors", landmark: '[data-tour="doctors-list"]' },
   {
+    path: "/assistants",
+    landmark: '[data-tour="assistants-list"]',
+  },
+  {
     path: "/implants",
     landmark: '[data-tour="implants-list"]',
     emptyState: "لا توجد بطاقات زراعة بعد",

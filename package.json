@@ -1,6 +1,6 @@
 {
   "name": "zuha",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -15,7 +15,7 @@
     "test:audit": "node scripts/run-tsx.mjs --test tests/audited-mutations.test.ts",
     "test:xrays": "node scripts/run-tsx.mjs --test tests/xray-income.test.ts",
     "test:ortho": "node scripts/run-tsx.mjs --test tests/ortho-open-total.test.ts",
-    "test": "npm run test:settlement && npm run test:payments && npm run test:audit && npm run test:xrays && npm run test:ortho && npm run test:lab && npm run test:dates && npm run test:wipe && npm run test:restore && npm run test:corrections && npm run test:links && npm run test:amounts && npm run test:multidoc && npm run test:cloud",
+    "test": "npm run test:settlement && npm run test:payments && npm run test:audit && npm run test:xrays && npm run test:ortho && npm run test:lab && npm run test:dates && npm run test:wipe && npm run test:restore && npm run test:corrections && npm run test:links && npm run test:amounts && npm run test:multidoc && npm run test:cloud && npm run test:assistants && npm run test:audit-fixes",
     "verify": "node scripts/run-verify.mjs",
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",
@@ -44,6 +44,8 @@
     "test:amounts": "node scripts/run-tsx.mjs --test tests/free-amount-input.test.ts",
     "test:multidoc": "node scripts/run-tsx.mjs --test tests/multi-doctor-case.test.ts",
     "test:cloud": "node scripts/run-tsx.mjs --test tests/cloud-backup.test.ts",
+    "test:assistants": "node scripts/run-tsx.mjs --test tests/assistants.test.ts",
+    "test:audit-fixes": "node scripts/run-tsx.mjs --test tests/audit-fixes.test.ts",
     "bundle:updater": "node scripts/bundle-updater.mjs",
     "backup:keygen": "node scripts/run-tsx.mjs scripts/backup-keygen.ts",
     "backup:open": "node scripts/run-tsx.mjs scripts/backup-open.ts",

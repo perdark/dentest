@@ -9,13 +9,21 @@ import {
   expenses,
   monthlySettlements,
   cashMovements,
+  assistants,
+  assistantSettlements,
 } from "@/lib/db/schema";
 import { getSettings, recordEdit } from "@/lib/server-utils";
 // دخل الأفلام يُقرأ من مكان واحد فقط — لا نسخة ثانية من الجمع هنا.
 import { xrayFilmIncomeForPeriod } from "@/lib/queries";
 import { formatPeriodAr } from "@/lib/dates";
 import { XRAY_BUCKET } from "@/lib/strings";
-import { calculateDoctorPayout, payoutShortfall } from "@/lib/settlement-math";
+import {
+  assistantPay,
+  assistantWorksIn,
+  calculateDoctorPayout,
+  payoutShortfall,
+  splitDoctorShare,
+} from "@/lib/settlement-math";
 
 export interface DoctorSettlement {
   doctorId: number;
@@ -28,10 +36,35 @@ export interface DoctorSettlement {
   accruedTotal: number;
   labCost: number;
   commissionPct: number;
+  /** The doctor's share before his assistants (his % of what he collected). */
+  grossPayout: number;
+  /** What his assistants are paid out of that share this month. */
+  assistantsTotal: number;
+  /**
+   * What the doctor is handed: `grossPayout − assistantsTotal`, never below 0.
+   * With no assistants this is exactly the share it always was.
+   */
   payout: number;
   /** Lab cost not covered by this month's share; settle by hand. [A6] */
   shortfall: number;
+  /** Assistant pay not covered by the share — the clinic paid it. */
+  assistantsShortfall: number;
   status: "draft" | "closed" | "stale" | "none";
+  paidAt: number | null;
+}
+
+export interface AssistantSettlementRow {
+  assistantId: number;
+  name: string;
+  doctorId: number;
+  doctorName: string;
+  doctorIsOwner: boolean;
+  payMode: "salary" | "percent";
+  pct: number;
+  salary: number;
+  amount: number;
+  /** The doctor's row status — an assistant is closed and paid with it. */
+  status: DoctorSettlement["status"];
   paidAt: number | null;
 }
 
@@ -39,7 +72,11 @@ export interface SettlementResult {
   period: string;
   doctors: DoctorSettlement[];
   totalCollected: number;
+  /** Handed to doctors (net of their assistants). */
   totalPayout: number;
+  /** Paid to assistants, out of their doctors' shares. */
+  totalAssistants: number;
+  assistants: AssistantSettlementRow[];
   /** X-ray cash collected in the period — clinic income, no doctor share. [D9] */
   xrayIncome: number;
   monthExpenses: number;
@@ -126,6 +163,22 @@ export function computeSettlement(
   const collectedBy = (id: number, bucket: string) =>
     collected.find((c) => c.doctorId === id && c.bucket === bucket)?.total ?? 0;
 
+  // Assistants who worked this month, and what a closed month froze for them.
+  const working = db
+    .select()
+    .from(assistants)
+    .orderBy(assistants.id)
+    .all()
+    .filter((a) => assistantWorksIn(period, a.startDate, a.endDate));
+  const frozenAssistants = db
+    .select({ row: assistantSettlements, name: assistants.name })
+    .from(assistantSettlements)
+    .innerJoin(assistants, eq(assistantSettlements.assistantId, assistants.id))
+    .where(eq(assistantSettlements.period, period))
+    .orderBy(assistantSettlements.assistantId)
+    .all();
+  const assistantRows: AssistantSettlementRow[] = [];
+
   const result: DoctorSettlement[] = docs.map((d) => {
     const ex = existing.find((e) => e.doctorId === d.id);
     const isClosed = ex?.status === "closed";
@@ -149,7 +202,52 @@ export function computeSettlement(
       labDeductedPerDoctor: s.labDeductedPerDoctor,
       pctAppliedAfterLab: s.pctAppliedAfterLab,
     };
-    const payout = isClosed ? ex!.payout : calculateDoctorPayout(formula);
+    const grossPayout = isClosed ? ex!.grossPayout : calculateDoctorPayout(formula);
+    const status = (ex?.status as DoctorSettlement["status"]) ?? "none";
+
+    // A closed month reads the assistants it was closed with; any other month
+    // pays whoever works for this doctor in it, at today's figures.
+    const mineAssistants = isClosed
+      ? frozenAssistants
+          .filter((f) => f.row.doctorId === d.id && f.row.status === "closed")
+          .map((f) => ({
+            assistantId: f.row.assistantId,
+            name: f.name,
+            payMode: f.row.payMode,
+            pct: f.row.pct,
+            salary: f.row.salary,
+            amount: f.row.amount,
+            paidAt: f.row.paidAt,
+          }))
+      : working
+          .filter((a) => a.doctorId === d.id)
+          .map((a) => ({
+            assistantId: a.id,
+            name: a.name,
+            payMode: a.payMode,
+            pct: a.pct,
+            salary: a.salary,
+            amount: assistantPay(grossPayout, a),
+            paidAt:
+              frozenAssistants.find((f) => f.row.assistantId === a.id)?.row.paidAt ?? null,
+          }));
+    for (const a of mineAssistants) {
+      assistantRows.push({
+        ...a,
+        doctorId: d.id,
+        doctorName: d.name,
+        doctorIsOwner: d.isOwner,
+        status,
+      });
+    }
+    const split = splitDoctorShare(
+      grossPayout,
+      mineAssistants.map((a) => a.amount),
+    );
+    // A closed row hands over what it froze; legacy rows (closed before
+    // assistants existed) have gross = payout and no assistants, so the two
+    // agree. [migration 0011]
+    const payout = isClosed ? ex!.payout : split.net;
 
     return {
       doctorId: d.id,
@@ -162,9 +260,12 @@ export function computeSettlement(
       accruedTotal: accrued.find((a) => a.doctorId === d.id)?.total ?? 0,
       labCost,
       commissionPct: pct,
+      grossPayout,
+      assistantsTotal: split.assistantsTotal,
       payout,
       shortfall: payoutShortfall(formula),
-      status: (ex?.status as DoctorSettlement["status"]) ?? "none",
+      assistantsShortfall: split.shortfall,
+      status,
       paidAt: ex?.paidAt ?? null,
     };
   });
@@ -178,6 +279,7 @@ export function computeSettlement(
 
   const totalCollected = result.reduce((s2, r) => s2 + r.collectedTotal, 0);
   const totalPayout = result.reduce((s2, r) => s2 + r.payout, 0);
+  const totalAssistants = assistantRows.reduce((s2, a) => s2 + a.amount, 0);
 
   // Clinic income: collected on the "xray" bucket, which no doctor row above
   // asked for. Read live even for a closed month, exactly like monthExpenses —
@@ -195,16 +297,23 @@ export function computeSettlement(
     doctors: result,
     totalCollected,
     totalPayout,
+    totalAssistants,
+    assistants: assistantRows,
     xrayIncome,
     monthExpenses,
     // [D7] salaries=0 (Layer 2). [D9] X-ray income is the clinic's, so it is
-    // added whole — no share was taken out of it upstream.
-    clinicNet: totalCollected + xrayIncome - totalPayout - monthExpenses,
+    // added whole — no share was taken out of it upstream. Assistants are paid
+    // out of their doctors' shares, so doctors + assistants is what leaves the
+    // drawer for the shares; it exceeds the shares only where an assistant
+    // cost more than his doctor earned, and that excess is the clinic's.
+    clinicNet:
+      totalCollected + xrayIncome - totalPayout - totalAssistants - monthExpenses,
     labDeductedPerDoctor: s.labDeductedPerDoctor,
     pctAppliedAfterLab: s.pctAppliedAfterLab,
     anyClosed: result.some((r) => r.status === "closed"),
     anyStale: result.some((r) => r.status === "stale"),
-    anyPaid: result.some((r) => r.paidAt !== null),
+    anyPaid:
+      result.some((r) => r.paidAt !== null) || assistantRows.some((a) => a.paidAt !== null),
   };
 }
 
@@ -216,7 +325,14 @@ export const closeSettlement = sqlite.transaction(
       .from(monthlySettlements)
       .where(and(eq(monthlySettlements.period, period), isNotNull(monthlySettlements.paidAt)))
       .get();
-    if (paid) return computeSettlement(period, overrides);
+    const assistantPaid = db
+      .select({ id: assistantSettlements.id })
+      .from(assistantSettlements)
+      .where(
+        and(eq(assistantSettlements.period, period), isNotNull(assistantSettlements.paidAt)),
+      )
+      .get();
+    if (paid || assistantPaid) return computeSettlement(period, overrides);
 
     const computed = computeSettlement(period, overrides);
     const now = Date.now();
@@ -244,6 +360,8 @@ export const closeSettlement = sqlite.transaction(
           labCost: d.labCost,
           commissionPct: d.commissionPct,
           payout: d.payout,
+          grossPayout: d.grossPayout,
+          assistantsTotal: d.assistantsTotal,
           status: "closed",
           closedAt: now,
           snapshotJson: snapshot,
@@ -260,6 +378,8 @@ export const closeSettlement = sqlite.transaction(
             labCost: d.labCost,
             commissionPct: d.commissionPct,
             payout: d.payout,
+            grossPayout: d.grossPayout,
+            assistantsTotal: d.assistantsTotal,
             status: "closed",
             closedAt: now,
             snapshotJson: snapshot,
@@ -286,6 +406,33 @@ export const closeSettlement = sqlite.transaction(
         note: "settlement closed",
       });
     }
+
+    // The assistants are frozen with their doctors. Nothing in the month is
+    // paid (checked above), so the month's rows are replaced outright: an
+    // assistant stopped or moved since the last close must not linger.
+    db.delete(assistantSettlements).where(eq(assistantSettlements.period, period)).run();
+    for (const a of computed.assistants) {
+      const values = {
+        period,
+        assistantId: a.assistantId,
+        doctorId: a.doctorId,
+        payMode: a.payMode,
+        pct: a.pct,
+        salary: a.salary,
+        amount: a.amount,
+        status: "closed" as const,
+        closedAt: now,
+        updatedAt: now,
+      };
+      const res = db.insert(assistantSettlements).values(values).run();
+      recordEdit({
+        entity: "assistant_settlements",
+        entityId: Number(res.lastInsertRowid),
+        action: "insert",
+        after: values,
+        note: "settlement closed",
+      });
+    }
     return computed;
   },
 ) as unknown as (period: string, overrides?: Record<number, number>) => SettlementResult;
@@ -303,6 +450,18 @@ export const reopenSettlement = sqlite.transaction((period: string): boolean => 
     .all();
   if (beforeRows.length === 0) return false;
   if (beforeRows.some((row) => row.paidAt !== null)) return false;
+  const assistantPaid = db
+    .select({ id: assistantSettlements.id })
+    .from(assistantSettlements)
+    .where(
+      and(eq(assistantSettlements.period, period), isNotNull(assistantSettlements.paidAt)),
+    )
+    .get();
+  if (assistantPaid) return false;
+  db.update(assistantSettlements)
+    .set({ status: "draft", closedAt: null, updatedAt: Date.now() })
+    .where(eq(assistantSettlements.period, period))
+    .run();
 
   db.update(monthlySettlements)
     .set({ status: "draft", closedAt: null, updatedAt: Date.now() })
@@ -417,3 +576,98 @@ export const finalizeSettlementPayout = sqlite.transaction(
   doctorId: number;
   paidDate: string;
 }) => SettlementPayoutResult;
+
+export type AssistantPayoutFailure = SettlementPayoutFailure | "doctor_not_closed";
+
+/**
+ * «صرف أجر المساعد» — one closed assistant row and its cash outflow, in one
+ * transaction, the same way a doctor's share is paid. Refused while his
+ * doctor's month is stale: the frozen figure may no longer be the right one.
+ */
+export const finalizeAssistantPayout = sqlite.transaction(
+  (input: {
+    period: string;
+    assistantId: number;
+    paidDate: string;
+  }):
+    | { ok: true; amount: number; cashMovementId: number }
+    | { ok: false; reason: AssistantPayoutFailure } => {
+    const before = db
+      .select()
+      .from(assistantSettlements)
+      .where(
+        and(
+          eq(assistantSettlements.period, input.period),
+          eq(assistantSettlements.assistantId, input.assistantId),
+        ),
+      )
+      .get();
+    if (!before) return { ok: false, reason: "not_found" };
+    if (before.status !== "closed") return { ok: false, reason: "not_closed" };
+    if (before.paidAt !== null) return { ok: false, reason: "already_paid" };
+    if (before.amount <= 0) return { ok: false, reason: "non_positive" };
+    const doctorRow = db
+      .select({ status: monthlySettlements.status })
+      .from(monthlySettlements)
+      .where(
+        and(
+          eq(monthlySettlements.period, input.period),
+          eq(monthlySettlements.doctorId, before.doctorId),
+        ),
+      )
+      .get();
+    if (doctorRow?.status !== "closed") return { ok: false, reason: "doctor_not_closed" };
+
+    const paidAt = Date.now();
+    const updated = db
+      .update(assistantSettlements)
+      .set({ paidAt, updatedAt: paidAt })
+      .where(and(eq(assistantSettlements.id, before.id), isNull(assistantSettlements.paidAt)))
+      .run();
+    if (updated.changes !== 1) return { ok: false, reason: "already_paid" };
+
+    const assistant = db
+      .select({ name: assistants.name })
+      .from(assistants)
+      .where(eq(assistants.id, input.assistantId))
+      .get();
+    const doctor = db
+      .select({ name: doctors.name })
+      .from(doctors)
+      .where(eq(doctors.id, before.doctorId))
+      .get();
+    const movement = {
+      moveDate: input.paidDate,
+      type: "payout" as const,
+      amount: -before.amount,
+      refTable: "assistant_settlements",
+      refId: before.id,
+      note: `صرف أجر المساعد ${assistant?.name ?? `#${input.assistantId}`} (${doctor?.name ?? ""}) — ${formatPeriodAr(input.period)}`,
+    };
+    const movementResult = db.insert(cashMovements).values(movement).run();
+    const cashMovementId = Number(movementResult.lastInsertRowid);
+
+    recordEdit({
+      entity: "assistant_settlements",
+      entityId: before.id,
+      action: "update",
+      before,
+      after: { paidAt },
+      note: "assistant payout finalized",
+    });
+    recordEdit({
+      entity: "cash_movements",
+      entityId: cashMovementId,
+      action: "insert",
+      after: movement,
+      note: "assistant payout cash outflow",
+    });
+    return { ok: true, amount: before.amount, cashMovementId };
+  },
+) as unknown as (input: {
+  period: string;
+  assistantId: number;
+  paidDate: string;
+}) =>
+  | { ok: true; amount: number; cashMovementId: number }
+  | { ok: false; reason: AssistantPayoutFailure };

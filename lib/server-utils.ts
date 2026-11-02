@@ -106,16 +106,35 @@ export function recordEdit(e: AuditEntry): boolean {
  */
 export function cashOnHand(): number {
   const s = getSettings();
+  // «بداية حساب النقد»: the opening balance is the drawer on that morning, so
+  // only records dated from that day on are added to it. Old payments typed in
+  // from the paper notebooks are history, not cash in the drawer. [2026-10-28]
+  const from = s.cashStartDate;
+  const since = (column: typeof payments.paidDate | typeof xrayFilms.filmDate | typeof expenses.expenseDate | typeof cashMovements.moveDate) =>
+    from ? sql`${column} >= ${from}` : sql`1 = 1`;
   const pay =
-    db.select({ v: sql<number>`coalesce(sum(${payments.amount}),0)` }).from(payments).get()?.v ?? 0;
+    db
+      .select({ v: sql<number>`coalesce(sum(${payments.amount}),0)` })
+      .from(payments)
+      .where(since(payments.paidDate))
+      .get()?.v ?? 0;
   const films =
-    db.select({ v: sql<number>`coalesce(sum(${xrayFilms.price}),0)` }).from(xrayFilms).get()?.v ?? 0;
+    db
+      .select({ v: sql<number>`coalesce(sum(${xrayFilms.price}),0)` })
+      .from(xrayFilms)
+      .where(since(xrayFilms.filmDate))
+      .get()?.v ?? 0;
   const exp =
-    db.select({ v: sql<number>`coalesce(sum(${expenses.amount}),0)` }).from(expenses).get()?.v ?? 0;
+    db
+      .select({ v: sql<number>`coalesce(sum(${expenses.amount}),0)` })
+      .from(expenses)
+      .where(since(expenses.expenseDate))
+      .get()?.v ?? 0;
   const mov =
     db
       .select({ v: sql<number>`coalesce(sum(${cashMovements.amount}),0)` })
       .from(cashMovements)
+      .where(since(cashMovements.moveDate))
       .get()?.v ?? 0;
   return s.openingCashBalance + pay + films - exp + mov;
 }

@@ -53,3 +53,51 @@ export function normalizeCommissionPct(
   if (!Number.isFinite(n)) return fallback;
   return Math.min(100, Math.max(0, Math.round(n)));
 }
+
+// ── Assistants (أجرهم من حصة الطبيب) [قرار العيادة 2026-10-28] ──────────────
+export interface AssistantPayInput {
+  payMode: "salary" | "percent";
+  /** IQD per month (salary mode). */
+  salary: number;
+  /** % of the doctor's share (percent mode). */
+  pct: number;
+}
+
+/**
+ * One assistant's pay for the month. Both modes are taken from the doctor's
+ * share: a salary is that fixed amount, a percentage is `pct`% of the share
+ * the doctor earned (after his own % and any lab deduction) — never of the
+ * gross collected.
+ */
+export function assistantPay(doctorShare: number, a: AssistantPayInput): number {
+  if (a.payMode === "salary") return Math.max(0, a.salary);
+  return Math.round((Math.max(0, doctorShare) * a.pct) / 100);
+}
+
+/**
+ * Split a doctor's share between him and his assistants. The assistants are
+ * always paid in full; the doctor gets what is left, never below zero. When
+ * the assistants cost more than the share (a salary in a quiet month, or an
+ * owner at 0%), the difference is `shortfall`: the clinic paid it, and for a
+ * hired doctor it is settled by hand like a lab shortfall. [A6]
+ */
+export function splitDoctorShare(
+  doctorShare: number,
+  assistantAmounts: number[],
+): { net: number; assistantsTotal: number; shortfall: number } {
+  const assistantsTotal = assistantAmounts.reduce((sum, v) => sum + v, 0);
+  return {
+    net: Math.max(0, doctorShare - assistantsTotal),
+    assistantsTotal,
+    shortfall: Math.max(0, assistantsTotal - doctorShare),
+  };
+}
+
+/** Does an assistant working `startDate`..`endDate` count in `period` (YYYY-MM)? */
+export function assistantWorksIn(
+  period: string,
+  startDate: string,
+  endDate: string | null,
+): boolean {
+  return startDate.slice(0, 7) <= period && (endDate === null || endDate.slice(0, 7) >= period);
+}

@@ -32,8 +32,14 @@ export default async function OrthoPage({
   const q = (sp.q ?? "").trim();
 
   const rows = orthoCases(q);
-  const doctors = listDoctors({ activeOnly: true });
-  const orthoDoctor = doctors.find((d) => d.doesOrtho);
+  const doctors = listDoctors({ activeOnly: true, does: "ortho" });
+  // The ortho doctor is the default, not whoever sorts first. Since the owner
+  // was also ticked «تقويم» (2026-09-30) and sorts first, every new ortho case
+  // opened on him at 0%, so the ortho doctor's % was never paid. A doctor who
+  // is not the owner wins; the owner is chosen only if he is the only one.
+  // [2026-10-28]
+  const orthoDoctor =
+    doctors.find((d) => d.doesOrtho && !d.isOwner) ?? doctors.find((d) => d.doesOrtho);
   const defaultDoctorId = orthoDoctor?.id ?? doctors[0]?.id ?? null;
 
   return (

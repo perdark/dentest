@@ -142,6 +142,14 @@ export default async function DoctorsPage({
                     المستحق للطبيب — حصة هذا الشهر
                   </p>
                   <p className="money text-2xl font-bold">{formatIQD(d.payout)}</p>
+                  {d.assistantsTotal > 0 ? (
+                    <p className="text-muted-foreground text-sm">
+                      بعد أجور المساعدين{" "}
+                      <span className="money text-amber-700 dark:text-amber-500">
+                        {formatIQD(d.assistantsTotal)}
+                      </span>
+                    </p>
+                  ) : null}
                 </div>
 
                 <dl className="grid gap-1.5 text-sm">

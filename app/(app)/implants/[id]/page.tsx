@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowRight } from "lucide-react";
-import { caseWithDetails, caseRaw, paymentsForCase, patientById } from "@/lib/queries";
+import { caseWithDetails, caseRaw, listDoctors, paymentsForCase, patientById } from "@/lib/queries";
 import { getSettings } from "@/lib/server-utils";
 import { formatIQD } from "@/lib/format";
 import { formatDateShort, formatDateShortY, todayISO } from "@/lib/dates";
@@ -22,6 +22,7 @@ import {
 import { VoidPaymentButton } from "@/components/forms/void-payment-button";
 import { EditPaymentDialog } from "@/components/forms/edit-payment-dialog";
 import { CardActions } from "../card-actions";
+import { ChangeDoctorDialog } from "@/components/forms/change-doctor-dialog";
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   open: "default",
@@ -95,22 +96,35 @@ export default async function ImplantCardPage({
             </div>
           </div>
         </div>
-        <CardActions
-          card={{
-            caseId: raw.id,
-            address,
-            labCost: raw.labCost,
-            listPrice: raw.listPrice,
-            discount: raw.discount,
-            status: raw.status,
-            notes: raw.notes,
-            paid: details.paid,
-            remaining: details.remaining,
-            patientName: details.patientName,
-          }}
-          today={today}
-          showLabCost={showLabCost}
-        />
+        <div className="flex flex-wrap gap-2">
+          <ChangeDoctorDialog
+            caseId={raw.id}
+            currentDoctorId={raw.doctorId}
+            currentDoctorName={details.doctorName}
+            doctors={listDoctors({ activeOnly: true, does: "implant" }).map((d) => ({
+              id: d.id,
+              name: d.name,
+            }))}
+            paidTotal={details.paid}
+            patientName={details.patientName}
+          />
+          <CardActions
+            card={{
+              caseId: raw.id,
+              address,
+              labCost: raw.labCost,
+              listPrice: raw.listPrice,
+              discount: raw.discount,
+              status: raw.status,
+              notes: raw.notes,
+              paid: details.paid,
+              remaining: details.remaining,
+              patientName: details.patientName,
+            }}
+            today={today}
+            showLabCost={showLabCost}
+          />
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">

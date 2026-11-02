@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowRight, StickyNote } from "lucide-react";
-import { caseWithDetails, caseRaw, paymentsForCase } from "@/lib/queries";
+import { caseWithDetails, caseRaw, listDoctors, paymentsForCase } from "@/lib/queries";
 import { formatIQD } from "@/lib/format";
 import { formatDateShortY, todayISO } from "@/lib/dates";
 import { PAYMENT_KIND_LABELS, CASE_STATUS_LABELS } from "@/lib/strings";
@@ -22,6 +22,7 @@ import { OrthoMetaForm } from "./ortho-meta-form";
 import { OrthoPaymentForm } from "./payment-form";
 import { OrthoDownPaymentSection } from "./down-payment-form";
 import { OrthoStatusButton } from "./case-status-form";
+import { ChangeDoctorDialog } from "@/components/forms/change-doctor-dialog";
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive"> = {
   open: "default",
@@ -44,6 +45,7 @@ export default async function OrthoCasePage({
   if (!detail || !raw || !detail.isOrtho) notFound();
 
   const payments = paymentsForCase(caseId);
+  const orthoDoctors = listDoctors({ activeOnly: true, does: "ortho" });
   // المقدمة صارت مبلغاً متفقاً عليه يُسدَّد على دفعات: المقبوض هو مجموع قيود
   // «المقدمة» كلها، لا أوّل دفعة وحدها. [قرار العيادة 2026-08-25]
   const downPaymentAgreed = raw.downPaymentAgreed;
@@ -97,9 +99,22 @@ export default async function OrthoCasePage({
             ملاحظة مسجّلة
           </Badge>
         ) : null}
+        {/* الطبيب ظاهر في رأس الحالة: حصّته تُحسب من كل جلسة هنا، وكانت 46
+            حالة على المالك لا يراها أحد إلا في جدول الدفعات. [2026-10-28] */}
+        <Badge variant="outline" className="text-sm">
+          {detail.doctorName}
+        </Badge>
         {/* الحالة تبقى «مفتوح» حتى تُغلقها العيادة بيدها — الزر بجانب الشارة
             حتى لا يُسأل «وكيف أغلقها؟». */}
-        <div className="ms-auto">
+        <div className="ms-auto flex flex-wrap gap-2">
+          <ChangeDoctorDialog
+            caseId={caseId}
+            currentDoctorId={raw.doctorId}
+            currentDoctorName={detail.doctorName}
+            doctors={orthoDoctors.map((d) => ({ id: d.id, name: d.name }))}
+            paidTotal={detail.paid}
+            patientName={detail.patientName}
+          />
           <OrthoStatusButton
             caseId={caseId}
             status={detail.status}

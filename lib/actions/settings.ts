@@ -14,6 +14,7 @@ import { verifyPin, hashPin } from "@/lib/crypto";
 import { parseAmount } from "@/lib/format";
 import { sqlite } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
+import { isRecordableDate } from "@/lib/dates";
 
 /** Re-render everything that reads settings. */
 function revalidateSettings(): void {
@@ -38,16 +39,26 @@ export async function updateGeneral(
   const parsed = z
     .object({
       openingCashBalance: z.string(),
+      cashStartDate: z.string().trim(),
     })
     .safeParse({
       openingCashBalance: String(formData.get("openingCashBalance") ?? ""),
+      cashStartDate: String(formData.get("cashStartDate") ?? ""),
     });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "تحقّق من البيانات المُدخلة" };
   }
+  // Blank = count every record ever (the rule before 2026-10-28). A date must
+  // be a real day that has already come — a start in the future would leave
+  // today's takings out of the drawer.
+  const start = parsed.data.cashStartDate;
+  if (start !== "" && !isRecordableDate(start)) {
+    return { error: "تاريخ بداية حساب النقد غير صحيح — لا يمكن أن يكون بعد اليوم." };
+  }
   updateSettings({
     // Money = integer dinars, parsed server-side, never negative.
     openingCashBalance: Math.max(0, parseAmount(parsed.data.openingCashBalance)),
+    cashStartDate: start === "" ? null : start,
   });
   revalidateSettings();
   return { ok: true };

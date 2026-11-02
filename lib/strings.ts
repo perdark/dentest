@@ -238,6 +238,7 @@ export const NAV_ITEMS = [
   { href: "/daily", label: "الدفتر اليومي", icon: "CalendarDays" },
   { href: "/patients", label: "المرضى", icon: "Users" },
   { href: "/doctors", label: "الأطباء", icon: "Stethoscope" },
+  { href: "/assistants", label: "المساعدون", icon: "HandHelping" },
   { href: "/implants", label: "الزراعة (الفهرس)", icon: "IdCard" },
   { href: "/ortho", label: "التقويم", icon: "Smile" },
   { href: "/xrays", label: "الأشعة", icon: "Scan" },

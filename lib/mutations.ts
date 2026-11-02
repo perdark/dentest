@@ -17,11 +17,14 @@ import {
   labEntries,
   xrayFilms,
   caseTeeth,
+  assistants,
+  assistantSettlements,
 } from "@/lib/db/schema";
 import { isValidToothCode, type Surface } from "@/lib/db/teeth";
 import { recordEdit, nextCounter } from "@/lib/server-utils";
 import { isValidISODate, isRecordableDate, monthOf, todayISO } from "@/lib/dates";
 import { ORTHO_BUCKET, XRAY_BUCKET } from "@/lib/strings";
+import { normalizeArabic } from "@/lib/arabic";
 
 function atomicMutation<TArgs extends unknown[], TResult>(
   mutation: (...args: TArgs) => TResult,
@@ -136,7 +139,8 @@ export type TreatmentTypeFailure =
   | "empty_name"
   | "implant_record"
   | "ortho_record"
-  | "xray_record";
+  | "xray_record"
+  | "payment_record";
 
 export type TreatmentTypeResult =
   | { ok: true; id: number; created: boolean }
@@ -148,8 +152,47 @@ export function treatmentTypeFailureMessage(reason: TreatmentTypeFailure): strin
     implant_record: "تُفتح حالات الزراعة من سجل الزراعة لإكمال بيانات البطاقة",
     ortho_record: "تُفتح حالات التقويم من سجل التقويم لإكمال بيانات الحالة",
     xray_record: "تُسجَّل الأشعة من سجل الأشعة — دخلها للعيادة لا للطبيب",
+    payment_record:
+      "هذا مبلغ على حساب سابق وليس علاجاً — أضِفه من «استلام مبلغ» على حالة المريض نفسها",
   } satisfies Record<TreatmentTypeFailure, string>;
   return messages[reason];
+}
+
+/**
+ * Other ways the clinic writes the names of the specially settled treatments,
+ * in folded form (`normalizeArabic`). The registered names themselves —
+ * «زراعة», «تقويم», the X-ray types — are matched without being listed here.
+ * «زراعه» reached the normal bucket five times in October 2026 because only
+ * the exact spelling was refused. [2026-10-28]
+ */
+const RESERVED_ALIASES: Record<string, "implant" | "ortho"> = {
+  "زرعه": "implant",
+  "زرع": "implant",
+  "زراعات": "implant",
+  "زرعات": "implant",
+  "زراعه سن": "implant",
+  "زراعه اسنان": "implant",
+  "زراعه الاسنان": "implant",
+  "تقويم اسنان": "ortho",
+  "تقويم الاسنان": "ortho",
+};
+
+/**
+ * A payment on an earlier account typed into the treatment field — «توصيل
+ * مبلغ», «توصيل دين», «قسط ماستر». Opened as a new case it counts the money as
+ * new work and leaves the original balance owing forever: 37 such cases were
+ * in the clinic's records by 2026-10-25. Unlike «تقويم» inside «تنظيف تقويمي»,
+ * these phrases never name a treatment, so matching inside the name is safe.
+ */
+function isPaymentPhrase(folded: string): boolean {
+  return (
+    folded.includes("توصيل مبلغ") ||
+    folded.includes("توصيل دين") ||
+    folded.includes("تسديد") ||
+    folded.startsWith("قسط") ||
+    folded === "دفعه" ||
+    folded === "مبلغ"
+  );
 }
 
 /** «  حشوة   مؤقتة » → «حشوة مؤقتة» — one written form per treatment. */
@@ -170,15 +213,43 @@ export const findOrCreateTreatmentType = atomicMutation((
 ): TreatmentTypeResult => {
   const name = normalizeTreatmentName(nameAr);
   if (!name) return { ok: false, reason: "empty_name" };
+  const folded = normalizeArabic(name);
 
-  // Matching is on the written name only — exactly what the secretary typed.
-  // No keyword sniffing: «تنظيف تقويمي» is a perfectly ordinary treatment and
-  // must be allowed, while «تقويم» itself is caught because it IS the row.
-  const existing = db
-    .select()
-    .from(treatmentTypes)
-    .where(sql`lower(trim(${treatmentTypes.nameAr})) = lower(${name})`)
-    .get();
+  if (isPaymentPhrase(folded)) return { ok: false, reason: "payment_record" };
+
+  // Matching is on the written name — what the secretary typed, folded so that
+  // «زراعه» is «زراعة». No keyword sniffing for treatments: «تنظيف تقويمي» is
+  // a perfectly ordinary treatment and must be allowed, while «تقويم» itself is
+  // caught because it IS the row. The special buckets are checked first, so an
+  // old normal row spelled like one of them («زراعه», created before this
+  // guard) is refused too instead of being reused. [2026-10-28]
+  const allTypes = db.select().from(treatmentTypes).all();
+  const alias = RESERVED_ALIASES[folded];
+  if (alias === "implant") return { ok: false, reason: "implant_record" };
+  if (alias === "ortho") return { ok: false, reason: "ortho_record" };
+  for (const t of allTypes) {
+    if (t.settlementBucket === "normal" && !t.isImplant && !t.isOrtho) continue;
+    if (normalizeArabic(t.nameAr) !== folded) continue;
+    if (t.isImplant || t.settlementBucket === "implant") {
+      return { ok: false, reason: "implant_record" };
+    }
+    if (t.isOrtho || t.settlementBucket === ORTHO_BUCKET) {
+      return { ok: false, reason: "ortho_record" };
+    }
+    if (t.settlementBucket === XRAY_BUCKET) return { ok: false, reason: "xray_record" };
+  }
+
+  // The exact spelling wins; failing that, the same word spelled another way
+  // («حشوه» for «حشوة») reuses the oldest row rather than adding a near twin.
+  const existing =
+    db
+      .select()
+      .from(treatmentTypes)
+      .where(sql`lower(trim(${treatmentTypes.nameAr})) = lower(${name})`)
+      .get() ??
+    allTypes
+      .filter((t) => normalizeArabic(t.nameAr) === folded)
+      .sort((a, b) => a.id - b.id)[0];
 
   if (existing) {
     if (existing.isImplant || existing.settlementBucket === "implant") {
@@ -1077,6 +1148,7 @@ export const updateSettings = atomicMutation((
   fields: Partial<{
     clinicName: string;
     openingCashBalance: number;
+    cashStartDate: string | null;
     cashReserveThreshold: number;
     labDeductedPerDoctor: boolean;
     pctAppliedAfterLab: boolean;
@@ -1153,6 +1225,7 @@ export function doctorRefCounts(id: number): {
   appointments: number;
   labEntries: number;
   settlements: number;
+  assistants: number;
   total: number;
 } {
   // ⚠️ Five explicit queries rather than a generic helper: the table/column
@@ -1181,6 +1254,9 @@ export function doctorRefCounts(id: number): {
         .where(eq(monthlySettlements.doctorId, id))
         .get(),
     ),
+    assistants: n(
+      db.select({ n: sql<number>`count(*)` }).from(assistants).where(eq(assistants.doctorId, id)).get(),
+    ),
   };
   return { ...counts, total: Object.values(counts).reduce((a, b) => a + b, 0) };
 }
@@ -1206,6 +1282,160 @@ export const deleteDoctor = atomicMutation((id: number): { ok: boolean; refs: nu
   recordEdit({ entity: "doctors", entityId: id, action: "delete", before });
   return { ok: true, refs: 0 };
 });
+
+// ── المساعدون (أجرهم من حصة الطبيب) [2026-10-28] ────────────────────────────
+export type AssistantInput = {
+  name: string;
+  doctorId: number;
+  payMode: "salary" | "percent";
+  /** IQD per month — salary mode only (stored 0 otherwise). */
+  salary: number;
+  /** 0-100 of the doctor's share — percent mode only (stored 0 otherwise). */
+  pct: number;
+  startDate: string;
+  notes?: string | null;
+};
+
+export type AssistantFailure =
+  | "not_found"
+  | "empty_name"
+  | "doctor_not_found"
+  | "invalid_amount"
+  | "invalid_pct"
+  | "invalid_date"
+  | "end_before_start"
+  | "has_history";
+
+export function assistantFailureMessage(reason: AssistantFailure): string {
+  const messages = {
+    not_found: "لم يتم العثور على المساعد؛ ربما حُذف.",
+    empty_name: "اكتب اسم المساعد",
+    doctor_not_found: "اختر الطبيب",
+    invalid_amount: "اكتب الراتب الشهري — مبلغ أكبر من صفر",
+    invalid_pct: "النسبة عدد صحيح من 1 إلى 100",
+    invalid_date: "التاريخ غير صحيح",
+    end_before_start: "تاريخ التوقف قبل تاريخ البدء",
+    has_history: "للمساعد أشهر مُقفلة — أوقِفه بدل حذفه حتى يبقى سجلّه",
+  } satisfies Record<AssistantFailure, string>;
+  return messages[reason];
+}
+
+function validateAssistant(
+  input: AssistantInput,
+): { ok: true; values: Omit<AssistantInput, "notes"> & { notes: string | null } } | { ok: false; reason: AssistantFailure } {
+  const name = input.name.trim();
+  if (!name) return { ok: false, reason: "empty_name" };
+  if (
+    !Number.isSafeInteger(input.doctorId) ||
+    !db.select({ id: doctors.id }).from(doctors).where(eq(doctors.id, input.doctorId)).get()
+  ) {
+    return { ok: false, reason: "doctor_not_found" };
+  }
+  if (!isValidISODate(input.startDate)) return { ok: false, reason: "invalid_date" };
+  if (input.payMode === "salary") {
+    if (!Number.isSafeInteger(input.salary) || input.salary <= 0) {
+      return { ok: false, reason: "invalid_amount" };
+    }
+  } else if (!Number.isSafeInteger(input.pct) || input.pct < 1 || input.pct > 100) {
+    return { ok: false, reason: "invalid_pct" };
+  }
+  return {
+    ok: true,
+    values: {
+      name,
+      doctorId: input.doctorId,
+      payMode: input.payMode,
+      salary: input.payMode === "salary" ? input.salary : 0,
+      pct: input.payMode === "percent" ? input.pct : 0,
+      startDate: input.startDate,
+      notes: input.notes?.trim() || null,
+    },
+  };
+}
+
+/**
+ * Add a doctor's assistant. Config, not money: nothing is paid until a month
+ * is closed in «الحصيلة», so no period is stamped and nothing goes stale —
+ * exactly like changing a doctor's own %.
+ */
+export const createAssistant = atomicMutation(
+  (input: AssistantInput): { ok: true; id: number } | { ok: false; reason: AssistantFailure } => {
+    const v = validateAssistant(input);
+    if (!v.ok) return v;
+    const res = db.insert(assistants).values(v.values).run();
+    const id = Number(res.lastInsertRowid);
+    recordEdit({ entity: "assistants", entityId: id, action: "insert", after: v.values });
+    return { ok: true, id };
+  },
+);
+
+/**
+ * Edit an assistant's name, doctor, pay or start date. Closed months keep the
+ * pay they were closed with; open months recompute with the new figures.
+ */
+export const updateAssistant = atomicMutation(
+  (
+    id: number,
+    input: AssistantInput & { endDate?: string | null },
+  ): { ok: true } | { ok: false; reason: AssistantFailure } => {
+    const before = db.select().from(assistants).where(eq(assistants.id, id)).get();
+    if (!before) return { ok: false, reason: "not_found" };
+    const v = validateAssistant(input);
+    if (!v.ok) return v;
+    const endDate = input.endDate === undefined ? before.endDate : input.endDate;
+    if (endDate !== null && !isValidISODate(endDate)) return { ok: false, reason: "invalid_date" };
+    if (endDate !== null && endDate < v.values.startDate) {
+      return { ok: false, reason: "end_before_start" };
+    }
+    const after = { ...v.values, endDate };
+    db.update(assistants).set(after).where(eq(assistants.id, id)).run();
+    recordEdit({ entity: "assistants", entityId: id, action: "update", before, after });
+    return { ok: true };
+  },
+);
+
+/**
+ * «إيقاف» — the assistant stops counting after `endDate`'s month, or comes back
+ * when `endDate` is null. Stopping rather than deleting keeps every month he
+ * was paid for readable.
+ */
+export const setAssistantEnd = atomicMutation(
+  (id: number, endDate: string | null): { ok: true } | { ok: false; reason: AssistantFailure } => {
+    const before = db.select().from(assistants).where(eq(assistants.id, id)).get();
+    if (!before) return { ok: false, reason: "not_found" };
+    if (endDate !== null) {
+      if (!isValidISODate(endDate)) return { ok: false, reason: "invalid_date" };
+      if (endDate < before.startDate) return { ok: false, reason: "end_before_start" };
+    }
+    db.update(assistants).set({ endDate }).where(eq(assistants.id, id)).run();
+    recordEdit({
+      entity: "assistants",
+      entityId: id,
+      action: "update",
+      before,
+      after: { endDate },
+      note: endDate ? "assistant stopped" : "assistant resumed",
+    });
+    return { ok: true };
+  },
+);
+
+/** Delete an assistant added by mistake — refused once a month was closed with him. */
+export const deleteAssistant = atomicMutation(
+  (id: number): { ok: true } | { ok: false; reason: AssistantFailure } => {
+    const before = db.select().from(assistants).where(eq(assistants.id, id)).get();
+    if (!before) return { ok: false, reason: "not_found" };
+    const history = db
+      .select({ n: sql<number>`count(*)` })
+      .from(assistantSettlements)
+      .where(eq(assistantSettlements.assistantId, id))
+      .get()?.n ?? 0;
+    if (history > 0) return { ok: false, reason: "has_history" };
+    db.delete(assistants).where(eq(assistants.id, id)).run();
+    recordEdit({ entity: "assistants", entityId: id, action: "delete", before });
+    return { ok: true };
+  },
+);
 
 // ── مستحقات المختبر (تتبّع فقط) ──────────────────────────────────────────────
 /**
@@ -1416,6 +1646,121 @@ export function caseEditFailureMessage(reason: CaseEditFailure): string {
   return messages[reason];
 }
 
+/**
+ * Re-credit a case's payments from one doctor to another. Each moved payment is
+ * audited against its own month, so every closed month that counted it goes
+ * stale [D4]. A payment deliberately credited to a third doctor stays put.
+ * Returns how many payments moved and their net total.
+ */
+function moveCasePayments(
+  caseId: number,
+  fromDoctorId: number,
+  toDoctorId: number,
+): { count: number; total: number } {
+  const moved = db
+    .select()
+    .from(payments)
+    .where(and(eq(payments.caseId, caseId), eq(payments.doctorId, fromDoctorId)))
+    .all();
+  for (const p of moved) {
+    db.update(payments).set({ doctorId: toDoctorId }).where(eq(payments.id, p.id)).run();
+    recordEdit({
+      entity: "payments",
+      entityId: p.id,
+      action: "update",
+      before: p,
+      after: { doctorId: toDoctorId },
+      period: monthOf(p.paidDate),
+      note: "doctor corrected on the case",
+    });
+  }
+  return { count: moved.length, total: moved.reduce((sum, p) => sum + p.amount, 0) };
+}
+
+export type ReassignDoctorFailure = "not_found" | "doctor_not_found" | "same_doctor";
+
+export function reassignDoctorFailureMessage(reason: ReassignDoctorFailure): string {
+  const messages = {
+    not_found: "لم يتم العثور على الحالة؛ ربما حُذفت.",
+    doctor_not_found: "اختر طبيباً صحيحاً.",
+    same_doctor: "الحالة مسجّلة على هذا الطبيب أصلاً.",
+  } satisfies Record<ReassignDoctorFailure, string>;
+  return messages[reason];
+}
+
+/**
+ * Move any case — implant card and ortho case included — to the doctor who
+ * actually treats it, taking its payments with it. [2026-10-28]
+ *
+ * The ortho and implant screens had no way to correct the doctor: by
+ * 2026-10-25, 46 of the clinic's 48 ortho cases sat on the owner (0%) while
+ * their appointments were with the ortho doctor, so her % was never paid and
+ * nothing on screen could fix it. The case keeps everything else — card
+ * number, down payment, sessions, dates. The money follows the doctor exactly
+ * as `updateCaseRecord` moves it for an ordinary case. [D2][D4]
+ */
+export const reassignCaseDoctor = sqlite.transaction(
+  (
+    caseId: number,
+    doctorId: number,
+  ):
+    | { ok: true; moved: { count: number; total: number } }
+    | { ok: false; reason: ReassignDoctorFailure } => {
+    const before = db.select().from(cases).where(eq(cases.id, caseId)).get();
+    if (!before) return { ok: false, reason: "not_found" };
+    if (!Number.isSafeInteger(doctorId) || doctorId <= 0) {
+      return { ok: false, reason: "doctor_not_found" };
+    }
+    if (!db.select({ id: doctors.id }).from(doctors).where(eq(doctors.id, doctorId)).get()) {
+      return { ok: false, reason: "doctor_not_found" };
+    }
+    if (before.doctorId === doctorId) return { ok: false, reason: "same_doctor" };
+
+    db.update(cases).set({ doctorId, updatedAt: Date.now() }).where(eq(cases.id, caseId)).run();
+    recordEdit({
+      entity: "cases",
+      entityId: caseId,
+      action: "update",
+      before,
+      after: { doctorId },
+      period: monthOf(before.openedDate),
+      note: "doctor corrected on the case",
+    });
+    const moved = moveCasePayments(caseId, before.doctorId, doctorId);
+
+    // The ortho «الموعد القادم» was booked under the case's doctor; it follows
+    // the case so «المواعيد» shows the patient on the right doctor's day.
+    if (before.nextAppointment && before.nextAppointment >= todayISO()) {
+      const booked = db
+        .select()
+        .from(appointments)
+        .where(
+          and(
+            eq(appointments.patientId, before.patientId),
+            eq(appointments.apptDate, before.nextAppointment),
+            eq(appointments.status, "booked"),
+            eq(appointments.doctorId, before.doctorId),
+          ),
+        )
+        .get();
+      if (booked) {
+        updateAppointment(booked.id, {
+          doctorId,
+          apptDate: booked.apptDate,
+          apptTime: booked.apptTime,
+          note: booked.note,
+        });
+      }
+    }
+    return { ok: true, moved };
+  },
+) as unknown as (
+  caseId: number,
+  doctorId: number,
+) =>
+  | { ok: true; moved: { count: number; total: number } }
+  | { ok: false; reason: ReassignDoctorFailure };
+
 function isOrdinaryType(treatmentTypeId: number): boolean {
   const type = db.select().from(treatmentTypes).where(eq(treatmentTypes.id, treatmentTypeId)).get();
   return (
@@ -1487,23 +1832,7 @@ export const updateCaseRecord = sqlite.transaction(
     );
 
     if (input.doctorId !== before.doctorId) {
-      const moved = db
-        .select()
-        .from(payments)
-        .where(and(eq(payments.caseId, caseId), eq(payments.doctorId, before.doctorId)))
-        .all();
-      for (const p of moved) {
-        db.update(payments).set({ doctorId: input.doctorId }).where(eq(payments.id, p.id)).run();
-        recordEdit({
-          entity: "payments",
-          entityId: p.id,
-          action: "update",
-          before: p,
-          after: { doctorId: input.doctorId },
-          period: monthOf(p.paidDate),
-          note: "doctor corrected on the case",
-        });
-      }
+      moveCasePayments(caseId, before.doctorId, input.doctorId);
     }
     return { ok: true };
   },
@@ -1755,6 +2084,7 @@ export interface WipeCounts {
   xrayFilms: number;
   caseTeeth: number;
   labEntries: number;
+  assistantSettlements: number;
 }
 
 /**
@@ -1795,6 +2125,12 @@ export const wipeAllRecords = atomicMutation((note: string): WipeCounts => {
     // خطأً، فتبقى مستحقات مختبر تجريبية تظهر في «الأطباء» ودفتر المختبرات
     // كلها على أنها ديون حقيقية. نفس سبب حذف الأفلام أعلاه. [2026-08-28]
     labEntries: count(db.select({ id: labEntries.id }).from(labEntries).all()),
+    // A month's frozen assistant pay is a money record like a doctor's row.
+    // The assistants themselves are setup (who works for whom) and stay,
+    // exactly like the doctors. [2026-10-28]
+    assistantSettlements: count(
+      db.select({ id: assistantSettlements.id }).from(assistantSettlements).all(),
+    ),
   };
 
   // Children before parents — foreign keys are ON.
@@ -1811,6 +2147,7 @@ export const wipeAllRecords = atomicMutation((note: string): WipeCounts => {
   db.delete(expenses).run();
   db.delete(cashMovements).run();
   db.delete(monthlySettlements).run();
+  db.delete(assistantSettlements).run();
   db.delete(xrayFilms).run();
   db.delete(auditLog).run();
 

@@ -158,6 +158,13 @@ export default async function DoctorPage({
             <h2 className="text-lg font-semibold">العيادة هذا الشهر</h2>
             <Row label="إجمالي المُحصَّل" value={formatIQD(result.totalCollected)} />
             <Row label="مجموع حصص الأطباء" value={formatIQD(result.totalPayout)} tone="outflow" />
+            {result.totalAssistants !== 0 ? (
+              <Row
+                label="أجور المساعدين"
+                value={formatIQD(result.totalAssistants)}
+                tone="outflow"
+              />
+            ) : null}
             <Row label="دخل الأشعة (للعيادة)" value={formatIQD(result.xrayIncome)} />
             <Row label="مصروفات الشهر" value={formatIQD(result.monthExpenses)} tone="outflow" />
             {/* خلاصة البطاقة — تُقرأ قبل مدخلاتها لا بعدها. */}
@@ -203,6 +210,29 @@ export default async function DoctorPage({
                   <span dir="ltr" className="tabular-nums">{mine.commissionPct}%</span>.
                   حدِّدها من «بيانات الطبيب» أدناه.
                 </p>
+              ) : null}
+              {/* المساعدون من حصته: الحصة قبلهم، ثم ما أخذوه، ثم ما يُسلَّم له. */}
+              {mine.assistantsTotal > 0 ? (
+                <>
+                  <Row label="حصته قبل المساعدين" value={formatIQD(mine.grossPayout)} />
+                  {result.assistants
+                    .filter((a) => a.doctorId === doctorId)
+                    .map((a) => (
+                      <Row
+                        key={a.assistantId}
+                        label={`المساعد ${a.name}`}
+                        value={formatIQD(a.amount)}
+                        tone="outflow"
+                      />
+                    ))}
+                  {mine.assistantsShortfall > 0 ? (
+                    <p className="text-sm text-amber-700 dark:text-amber-500">
+                      {doctor.isOwner
+                        ? `أجور المساعدين تزيد ${formatIQD(mine.assistantsShortfall)} عن الحصة — تُدفع من صافي العيادة.`
+                        : `أجور المساعدين تزيد ${formatIQD(mine.assistantsShortfall)} عن حصته — الفرق يُسوّى يدوياً.`}
+                    </p>
+                  ) : null}
+                </>
               ) : null}
               {/* خلاصة البطاقة. */}
               <div className="border-primary/30 bg-primary/5 mt-1 rounded-lg border px-3 py-2.5">

@@ -43,10 +43,18 @@ const MUST_EMPTY = [
   "xray_films",
   "case_teeth",
   "lab_entries",
+  "assistant_settlements",
 ] as const;
 
 /** Clinic SETUP the wipe must keep — re-entering it would be a second job. */
-const MUST_SURVIVE = ["doctors", "treatment_types", "settings", "counters", "price_list"] as const;
+const MUST_SURVIVE = [
+  "doctors",
+  "treatment_types",
+  "settings",
+  "counters",
+  "price_list",
+  "assistants",
+] as const;
 
 /** Neither: the audit log is emptied and then gets one row explaining the wipe. */
 const SPECIAL = ["audit_log", "__drizzle_migrations"] as const;
@@ -123,6 +131,30 @@ before(async () => {
       payout: 25_000,
     })
     .run();
+
+  // The assistant is setup and survives; his frozen month is a record and goes.
+  const assistant = m.createAssistant({
+    name: "مساعد الاختبار",
+    doctorId,
+    payMode: "salary",
+    salary: 100_000,
+    pct: 0,
+    startDate: DATE,
+  });
+  assert.equal(assistant.ok, true, "تهيئة الاختبار: المساعد أُضيف");
+  if (assistant.ok) {
+    db.insert(schema.assistantSettlements)
+      .values({
+        period: PERIOD,
+        assistantId: assistant.id,
+        doctorId,
+        payMode: "salary",
+        salary: 100_000,
+        amount: 100_000,
+        status: "closed",
+      })
+      .run();
+  }
 
   for (const t of [...MUST_EMPTY, ...MUST_SURVIVE]) countsBefore[t] = rows(t);
   for (const t of MUST_EMPTY) {

@@ -1,6 +1,7 @@
 import { Settings } from "lucide-react";
 import type { Metadata } from "next";
 import { getSettings } from "@/lib/server-utils";
+import { todayISO } from "@/lib/dates";
 import { listBackups, pendingRestore } from "@/lib/actions/settings";
 import { SettingsForms } from "./settings-forms";
 
@@ -15,6 +16,7 @@ export default async function SettingsPage() {
   // secret columns (pinHash / sessionSecret) in the RSC payload.
   const settings = {
     openingCashBalance: s.openingCashBalance,
+    cashStartDate: s.cashStartDate,
     cashReserveThreshold: s.cashReserveThreshold,
     labDeductedPerDoctor: s.labDeductedPerDoctor,
     pctAppliedAfterLab: s.pctAppliedAfterLab,
@@ -33,6 +35,7 @@ export default async function SettingsPage() {
         settings={settings}
         backups={backups}
         pendingRestoreName={pendingRestoreName}
+        today={todayISO()}
       />
     </div>
   );

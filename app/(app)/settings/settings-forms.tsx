@@ -18,6 +18,7 @@ import type { Settings } from "@/lib/db/schema";
 type SettingsView = Pick<
   Settings,
   | "openingCashBalance"
+  | "cashStartDate"
   | "cashReserveThreshold"
   | "labDeductedPerDoctor"
   | "pctAppliedAfterLab"
@@ -38,6 +39,7 @@ import {
   type RestoreState,
 } from "@/lib/actions/settings";
 import { formatIQD, formatNumber } from "@/lib/format";
+import { EARLIEST_RECORD_DATE } from "@/lib/dates";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -89,16 +91,36 @@ function formatBytes(bytes: number): string {
 }
 
 // ── العيادة ──────────────────────────────────────────────────────────────────
-function GeneralSection({ settings }: { settings: SettingsView }) {
+function GeneralSection({ settings, today }: { settings: SettingsView; today: string }) {
   const { state, formAction } = useSettingsForm(updateGeneral, "تم الحفظ");
   return (
-    <form action={formAction}>
+    // Remounted when the saved values change, so the inputs take the new
+    // values as their defaults instead of Base UI warning about an
+    // uncontrolled default changing under it.
+    <form action={formAction} key={`${settings.cashStartDate ?? ""}|${settings.openingCashBalance}`}>
       <Card>
         <CardHeader>
           <CardTitle>الصندوق</CardTitle>
-          <CardDescription>الرصيد النقدي الافتتاحي.</CardDescription>
+          <CardDescription>من أي يوم يبدأ حساب «النقد المتوفر»، وكم كان في الصندوق صباح ذلك اليوم.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="cashStartDate">بداية حساب النقد</Label>
+            <Input
+              id="cashStartDate"
+              name="cashStartDate"
+              type="date"
+              defaultValue={settings.cashStartDate ?? ""}
+              min={EARLIEST_RECORD_DATE}
+              max={today}
+              className="h-11"
+            />
+            <p className="text-muted-foreground text-sm">
+              الدفعات والمصروفات والحركات المؤرَّخة قبل هذا اليوم — مثل الدفعات القديمة
+              المنقولة من الدفاتر — لا تدخل في «النقد المتوفر». اتركه فارغاً لحساب كل
+              السجلات.
+            </p>
+          </div>
           <div className="space-y-2">
             <Label htmlFor="openingCashBalance">الرصيد النقدي الافتتاحي (د.ع)</Label>
             <Input
@@ -111,7 +133,7 @@ function GeneralSection({ settings }: { settings: SettingsView }) {
               className="money h-11 text-start"
             />
             <p className="text-muted-foreground text-sm">
-              النقد الموجود في الصندوق قبل بدء العمل في النظام. يدخل في حساب النقد المتوفر.
+              النقد الموجود في الصندوق صباح يوم بداية الحساب. يدخل في حساب النقد المتوفر.
             </p>
           </div>
           <FormError state={state} />
@@ -579,14 +601,16 @@ export function SettingsForms({
   settings,
   backups,
   pendingRestoreName,
+  today,
 }: {
   settings: SettingsView;
   backups: BackupFile[];
   pendingRestoreName: string | null;
+  today: string;
 }) {
   return (
     <div className="space-y-6">
-      <GeneralSection settings={settings} />
+      <GeneralSection settings={settings} today={today} />
       <AccountingSection settings={settings} />
       <PinSection />
       <BackupSection backups={backups} />

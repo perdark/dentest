@@ -5,6 +5,8 @@ import { revalidatePath } from "next/cache";
 import {
   caseEditFailureMessage,
   deleteCaseCascade,
+  reassignCaseDoctor,
+  reassignDoctorFailureMessage,
   findOrCreateTreatmentType,
   treatmentTypeFailureMessage,
   updateCaseRecord,
@@ -88,5 +90,39 @@ export async function deleteCaseAction(
   }
 
   revalidateCaseScreens(existing.patientId);
+  return { ok: true };
+}
+
+// ── تغيير طبيب الحالة (الزراعة والتقويم والعادي) ────────────────────────────
+const reassignSchema = z.object({
+  caseId: z.coerce.number().int().positive(),
+  doctorId: z.coerce.number().int().positive("اختر الطبيب"),
+});
+
+/**
+ * Move a case — an implant card or an ortho case included — to the doctor who
+ * treats it, with its payments. The only way to correct the doctor on those
+ * two screens, which until 2026-10-28 had none. [D2]
+ */
+export async function reassignCaseDoctorAction(
+  _prev: CaseEditState,
+  formData: FormData,
+): Promise<CaseEditState> {
+  await requireAuth();
+  const parsed = reassignSchema.safeParse(Object.fromEntries(formData));
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "تحقّق من البيانات المُدخلة" };
+  }
+  const existing = caseRaw(parsed.data.caseId);
+  if (!existing) return { error: reassignDoctorFailureMessage("not_found") };
+
+  const result = reassignCaseDoctor(parsed.data.caseId, parsed.data.doctorId);
+  if (!result.ok) return { error: reassignDoctorFailureMessage(result.reason) };
+
+  revalidateCaseScreens(existing.patientId);
+  revalidatePath(`/ortho/${parsed.data.caseId}`);
+  revalidatePath(`/implants/${parsed.data.caseId}`);
+  revalidatePath("/appointments");
+  revalidatePath("/doctors", "layout");
   return { ok: true };
 }

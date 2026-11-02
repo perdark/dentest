@@ -4,7 +4,7 @@ import { useActionState, useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner";
 import { AlertTriangle, CircleCheckBig, Lock, Unlock } from "lucide-react";
 import Link from "next/link";
-import type { SettlementResult } from "@/lib/settlement";
+import type { AssistantSettlementRow, SettlementResult } from "@/lib/settlement";
 import { formatIQD } from "@/lib/format";
 import { formatPeriodAr, EARLIEST_RECORD_DATE } from "@/lib/dates";
 import { SETTLEMENT_STATUS_LABELS } from "@/lib/strings";
@@ -45,6 +45,7 @@ import {
   closeMonth,
   reopenMonth,
   markPaid,
+  markAssistantPaid,
   type CloseState,
   type PayoutState,
 } from "@/lib/actions/settlement";
@@ -100,9 +101,15 @@ export function SettlementTable({
   const sumAccrued = result.doctors.reduce((a, d) => a + d.accruedTotal, 0);
   const totalCollected = result.totalCollected;
   const liveTotalPayout = result.doctors.reduce((a, d) => a + d.payout, 0);
+  const totalAssistants = result.totalAssistants;
   // دخل الأشعة يدخل الصافي كاملاً: لم تُقتطع منه حصة لأي طبيب. [D9]
+  // أجور المساعدين من حصص أطبائهم، فالخارج للحصص = الأطباء + مساعدوهم.
   const clinicNet =
-    totalCollected + result.xrayIncome - liveTotalPayout - result.monthExpenses;
+    totalCollected +
+    result.xrayIncome -
+    liveTotalPayout -
+    totalAssistants -
+    result.monthExpenses;
 
   const canClose = !result.anyClosed && !result.anyPaid;
   const canReopen = (result.anyClosed || result.anyStale) && !result.anyPaid;
@@ -114,6 +121,14 @@ export function SettlementTable({
   const shortfalls = result.doctors
     .map((d) => ({ id: d.doctorId, name: d.doctorName, amount: d.shortfall }))
     .filter((s) => s.amount > 0);
+  // أجور مساعدين تجاوزت حصة طبيب موظَّف: الفرق دفعته العيادة ويُسوّى معه
+  // يدوياً. المالك مستثنى — حصته من الصافي، فالفرق عليه أصلاً.
+  const assistantShortfalls = result.doctors
+    .filter((d) => !d.isOwner && d.assistantsShortfall > 0)
+    .map((d) => ({ id: d.doctorId, name: d.doctorName, amount: d.assistantsShortfall }));
+  const payoutAssistants = result.assistants.filter(
+    (a) => a.status === "closed" && a.amount > 0,
+  );
 
   return (
     <div className="flex flex-col gap-4">
@@ -139,6 +154,28 @@ export function SettlementTable({
               </ul>
               <span className="block">
                 الفرق يُسوّى يدوياً خارج البرنامج — لا يُخصم من أي حصة هنا.
+              </span>
+            </AlertDescription>
+          </Alert>
+        ) : null}
+
+        {assistantShortfalls.length > 0 ? (
+          <Alert>
+            <AlertTriangle />
+            <AlertTitle className="text-base font-semibold">
+              أجور المساعدين أكبر من حصة الطبيب
+            </AlertTitle>
+            <AlertDescription className="text-sm">
+              <ul className="my-1 flex flex-col gap-0.5">
+                {assistantShortfalls.map((s) => (
+                  <li key={s.id} className="flex flex-wrap items-baseline gap-2">
+                    <span className="font-medium">{s.name}</span>
+                    <span className="money font-bold">{formatIQD(s.amount)}</span>
+                  </li>
+                ))}
+              </ul>
+              <span className="block">
+                تدفعه العيادة للمساعد كاملاً، والفرق على الطبيب يُسوّى يدوياً.
               </span>
             </AlertDescription>
           </Alert>
@@ -218,6 +255,15 @@ export function SettlementTable({
                           <span className="text-base font-bold">
                             {formatIQD(d.payout)}
                           </span>
+                          {/* الحصة بعد المساعدين — ومن أين جاء الفرق، بحجم يُقرأ. */}
+                          {d.assistantsTotal > 0 ? (
+                            <span className="text-muted-foreground block text-sm font-normal">
+                              <span className="block">من {formatIQD(d.grossPayout)}</span>
+                              <span className="block text-amber-700 dark:text-amber-500">
+                                − مساعدون {formatIQD(d.assistantsTotal)}
+                              </span>
+                            </span>
+                          ) : null}
                           {/* نقص المختبر مال يُسوّى بيد الموظف خارج البرنامج —
                               يُقرأ بحجم كامل مع أيقونة، لا بأصغر خط في الصفحة. */}
                           {d.shortfall > 0 ? (
@@ -301,8 +347,8 @@ export function SettlementTable({
                 <DialogHeader>
                   <DialogTitle>تأكيد إقفال {formatPeriodAr(period)}</DialogTitle>
                   <DialogDescription>
-                    يُجمّد الإقفال النِّسَب والحصص والمبالغ المُحصّلة كما هي الآن،
-                    ويمكنك إعادة فتح الشهر لاحقاً.
+                    يُجمّد الإقفال النِّسَب والحصص وأجور المساعدين والمبالغ المُحصّلة
+                    كما هي الآن، ويمكنك إعادة فتح الشهر لاحقاً.
                   </DialogDescription>
                 </DialogHeader>
                 <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
@@ -334,8 +380,8 @@ export function SettlementTable({
           <CardTitle>صافي العيادة</CardTitle>
           <CardDescription>
             إجمالي المحصّل
-            {result.xrayIncome !== 0 ? " + دخل الأشعة" : ""} − إجمالي الحصص −
-            مصروفات الشهر
+            {result.xrayIncome !== 0 ? " + دخل الأشعة" : ""} − إجمالي الحصص
+            {totalAssistants !== 0 ? " − أجور المساعدين" : ""} − مصروفات الشهر
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-2">
@@ -351,6 +397,13 @@ export function SettlementTable({
             <span className="text-amber-700 dark:text-amber-500">
               − {formatIQD(liveTotalPayout)}
             </span>{" "}
+            {totalAssistants !== 0 ? (
+              <>
+                <span className="text-amber-700 dark:text-amber-500">
+                  − {formatIQD(totalAssistants)}
+                </span>{" "}
+              </>
+            ) : null}
             <span className="text-amber-700 dark:text-amber-500">
               − {formatIQD(result.monthExpenses)}
             </span>
@@ -386,6 +439,8 @@ export function SettlementTable({
           ) : null}
         </CardContent>
       </Card>
+
+      {result.assistants.length > 0 ? <AssistantsCard rows={result.assistants} /> : null}
 
       {/* حالة الإقفال: شارة مُقفل + ملاحظة التقادم + إعادة الفتح + صرف الحصص. */}
       {result.anyClosed || result.anyStale ? (
@@ -460,10 +515,190 @@ export function SettlementTable({
                 </ul>
               </div>
             ) : null}
+
+            {payoutAssistants.length > 0 ? (
+              <div className="flex flex-col gap-2">
+                <p className="text-base font-semibold">صرف أجور المساعدين</p>
+                <ul className="divide-y rounded-lg border">
+                  {payoutAssistants.map((a) => (
+                    <li
+                      key={a.assistantId}
+                      className="flex flex-wrap items-center justify-between gap-2 px-3 py-2"
+                    >
+                      <span className="text-base font-medium">
+                        {a.name}{" "}
+                        <span className="text-muted-foreground text-sm font-normal">
+                          ({a.doctorName})
+                        </span>
+                      </span>
+                      <span className="money text-base font-bold">{formatIQD(a.amount)}</span>
+                      {a.paidAt ? (
+                        <Badge variant="secondary">تم الصرف</Badge>
+                      ) : (
+                        <AssistantPayoutDialog
+                          period={period}
+                          assistantId={a.assistantId}
+                          name={a.name}
+                          amount={a.amount}
+                          today={today}
+                        />
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </CardContent>
         </Card>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * أجور المساعدين هذا الشهر — كل مساعد وطبيبه وأساس أجره. الرقم نفسه الذي
+ * طُرح من حصة طبيبه في الجدول أعلاه.
+ */
+function AssistantsCard({ rows }: { rows: AssistantSettlementRow[] }) {
+  const total = rows.reduce((sum, a) => sum + a.amount, 0);
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>أجور المساعدين</CardTitle>
+        <CardDescription>
+          تُخصم من حصة كل طبيب — تُدار من{" "}
+          <Link href="/assistants" className="text-primary font-medium underline-offset-4 hover:underline">
+            شاشة «المساعدون»
+          </Link>
+          .
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="px-0">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>المساعد</TableHead>
+              <TableHead>الطبيب</TableHead>
+              <TableHead>الأجر</TableHead>
+              <TableHead className="text-end">المبلغ</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((a) => (
+              <TableRow key={a.assistantId}>
+                <TableCell className="font-medium">{a.name}</TableCell>
+                <TableCell>
+                  {a.doctorName}
+                  {a.doctorIsOwner ? (
+                    <span className="text-muted-foreground block text-xs">
+                      من صافي العيادة
+                    </span>
+                  ) : null}
+                </TableCell>
+                <TableCell className="whitespace-nowrap">
+                  {a.payMode === "salary" ? (
+                    "راتب شهري"
+                  ) : (
+                    <>
+                      <span dir="ltr" className="tabular-nums">
+                        {a.pct}%
+                      </span>{" "}
+                      من الحصة
+                    </>
+                  )}
+                </TableCell>
+                <TableCell className="money text-end font-semibold">
+                  {formatIQD(a.amount)}
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+          <TableFooter>
+            <TableRow>
+              <TableCell colSpan={3} className="font-semibold">
+                الإجمالي
+              </TableCell>
+              <TableCell className="money text-end font-bold">{formatIQD(total)}</TableCell>
+            </TableRow>
+          </TableFooter>
+        </Table>
+      </CardContent>
+    </Card>
+  );
+}
+
+function AssistantPayoutDialog({
+  period,
+  assistantId,
+  name,
+  amount,
+  today,
+}: {
+  period: string;
+  assistantId: number;
+  name: string;
+  amount: number;
+  today: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [state, formAction, pending] = useActionState<PayoutState, FormData>(
+    markAssistantPaid,
+    {},
+  );
+  useActionToast(state, `تم صرف أجر ${name}`, useCallback(() => setOpen(false), []));
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger
+        render={
+          <Button variant="outline" className="h-11 whitespace-nowrap">
+            صرف الأجر
+          </Button>
+        }
+      />
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>صرف أجر — {name}</DialogTitle>
+          <DialogDescription>
+            سيُحفظ المبلغ المعتمد {formatIQD(amount)} كحركة نقدية صادرة لشهر{" "}
+            {formatPeriodAr(period)}. لا يمكن الصرف مرتين.
+          </DialogDescription>
+        </DialogHeader>
+        <form action={formAction} className="flex flex-col gap-4">
+          <input type="hidden" name="period" value={period} />
+          <input type="hidden" name="assistantId" value={assistantId} />
+          <FieldGroup>
+            <Field data-invalid={Boolean(state.error)}>
+              <FieldLabel htmlFor={`as-pay-date-${assistantId}`}>تاريخ الصرف</FieldLabel>
+              <Input
+                id={`as-pay-date-${assistantId}`}
+                name="date"
+                type="date"
+                defaultValue={today}
+                min={EARLIEST_RECORD_DATE}
+                max={today}
+                className="h-11"
+                aria-invalid={Boolean(state.error)}
+                autoFocus
+              />
+              <FieldError>{state.error}</FieldError>
+            </Field>
+          </FieldGroup>
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <DialogClose
+              render={
+                <Button type="button" variant="outline" className="h-11">
+                  إلغاء
+                </Button>
+              }
+            />
+            <Button type="submit" className="h-11" disabled={pending || state.ok}>
+              {pending ? "جارٍ الحفظ…" : "حفظ الصرف"}
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 

@@ -6,6 +6,7 @@ import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import * as schema from "./schema";
 import { adoptLegacyDatabase, applyPendingRestore, databasePath } from "../paths";
+import { normalizeArabic } from "../arabic";
 
 // Carry a pre-rename dentest.db over to zuha.db. Must happen before the
 // connection below, which would otherwise create an empty file first.
@@ -35,6 +36,13 @@ const sqlite =
   })();
 
 if (process.env.NODE_ENV !== "production") globalForDb.__zuhaSqlite = sqlite;
+
+// `ar_norm(text)` in SQL = `normalizeArabic` in JS, so a search for «سبا»
+// finds «سبأ». Registered on every load, not only when the connection is made:
+// a dev reload reuses the cached connection. [2026-10-28]
+sqlite.function("ar_norm", { deterministic: true }, (value: unknown) =>
+  typeof value === "string" ? normalizeArabic(value) : value,
+);
 
 export const db = drizzle(sqlite, { schema });
 export { schema, sqlite };

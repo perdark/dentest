@@ -29,6 +29,10 @@ Next.js 16 (App Router, RSC, server actions) · TypeScript · Tailwind v4 · sha
    definition, so `lib/actions/appointments.ts` and the `nextAppointment` fields in
    `lib/actions/ortho.ts` stay on `isValidISODate`.
 7. **Nothing in the UI tells the clinic it is looking at a test system.** No demo banner, no "غير مؤكد", no placeholder or TODO text. Demo data is loaded by `npm run db:demo` before handover, never from inside the app.
+8. **A doctor's `payout` is NET of his assistants** (2026-10-28). Assistants are paid out of
+   their doctor's share — salary or % of the share — never from collections directly.
+   `grossPayout` is the share before them; `clinicNet` subtracts `totalPayout + totalAssistants`.
+   A treatment name is compared folded (`normalizeArabic`: أ/ا, ة/ه, ى/ي) — never raw.
 
 ## Commands
 - `npm run db:setup` — migrate + seed (run once; seeds 4 doctors, 11 treatment types, **default PIN 1234**). No prices are seeded — «قائمة الأسعار» was removed 2026-08-19 and every case is priced when it is opened. Doctors are seeded without a lab name; each is set from «الأطباء ← اسم الطبيب».
@@ -68,9 +72,9 @@ Next.js 16 (App Router, RSC, server actions) · TypeScript · Tailwind v4 · sha
 
 ## Testing — three layers, do not duplicate between them
 - `npm test` — money arithmetic in isolation (settlement, payments, audit, x-ray income,
-  ortho open-total, lab dues).
+  ortho open-total, lab dues, assistants, audit fixes).
 - `npm run verify` — D1–D9 end-to-end against the real data layer on a throwaway `verify.db`.
-- `npm run e2e` — **browser** tests (Playwright, `e2e/`): PIN gate, all 16 screens render in RTL
+- `npm run e2e` — **browser** tests (Playwright, `e2e/`): PIN gate, all 17 screens render in RTL
   without console errors, and form → server action → mutations → settlement wiring. ~1 min.
   Runs its own `next dev` on **port 3100** with `ZUHA_DB=./e2e.db` + `ZUHA_BACKUPS_DIR=./e2e-backups`,
   so it can never touch clinic data. `npm run e2e:report` for the HTML report after a failure.
