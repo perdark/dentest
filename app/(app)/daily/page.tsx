@@ -10,7 +10,8 @@ import {
 import { todayISO, isValidISODate, formatDateAr } from "@/lib/dates";
 import { formatIQD } from "@/lib/format";
 import {
-  PAYMENT_KIND_LABELS, paymentKindLabel,
+  ORTHO_BUCKET,
+  paymentKindLabel,
   XRAY_BUCKET,
   XRAY_PLACEMENT_LABELS,
 } from "@/lib/strings";
@@ -34,6 +35,26 @@ function shiftISO(iso: string, days: number): string {
 }
 
 type LedgerRow = ReturnType<typeof dailyLedger>[number];
+
+/**
+ * The owner's card is split three ways — he does normal work, implant and
+ * ortho visits, and takes payments on old accounts, and all of it landed in
+ * one list the clinic could not read back. [قرار العيادة 2026-11-04]
+ *  - «عمل عادي»: a treatment opened that same day.
+ *  - «جلسات»: an implant or ortho visit.
+ *  - «توصيل مبلغ»: money on an ordinary treatment opened on an earlier day.
+ * Only the grouping is new: the lines and «مجموع الطبيب» are unchanged.
+ */
+const OWNER_SECTIONS = [
+  { key: "work", label: "عمل عادي" },
+  { key: "sessions", label: "جلسات" },
+  { key: "delivery", label: "توصيل مبلغ" },
+] as const;
+
+function ownerSection(line: LedgerRow, date: string): (typeof OWNER_SECTIONS)[number]["key"] {
+  if (line.bucket === "implant" || line.bucket === ORTHO_BUCKET) return "sessions";
+  return line.caseOpenedDate < date ? "delivery" : "work";
+}
 
 function kindVariant(kind: string): "destructive" | "secondary" | "outline" {
   if (kind === "refund") return "destructive";
@@ -61,6 +82,11 @@ export default async function DailyPage({
   // «الدفتر اليومي» opens normal-work cases only — implants, ortho and x-rays
   // each have their own screen — so it offers only doctors who do normal work.
   const doctors = listDoctors({ activeOnly: true, does: "normal" });
+  // An ortho line's doctor is corrected from its pen, as on the ortho case.
+  const orthoDoctors = listDoctors({ activeOnly: true, does: "ortho" }).map((d) => ({
+    id: d.id,
+    name: d.name,
+  }));
   // الأشعة لها سجلها الخاص، ودخلها للعيادة لا للطبيب — فلا تُفتح من هنا. [D9]
   // The bucket filter lives in the query rather than here, so the rule is
   // stated once in SQL; the query also orders by the last time each treatment
@@ -70,17 +96,107 @@ export default async function DailyPage({
   // Group ledger lines by doctor (rows already sorted by doctor sortOrder).
   const groups = new Map<
     number,
-    { doctorId: number; doctorName: string; lines: LedgerRow[]; subtotal: number }
+    {
+      doctorId: number;
+      doctorName: string;
+      isOwner: boolean;
+      lines: LedgerRow[];
+      subtotal: number;
+    }
   >();
   for (const r of rows) {
     let g = groups.get(r.doctorId);
     if (!g) {
-      g = { doctorId: r.doctorId, doctorName: r.doctorName, lines: [], subtotal: 0 };
+      g = {
+        doctorId: r.doctorId,
+        doctorName: r.doctorName,
+        isOwner: r.doctorIsOwner,
+        lines: [],
+        subtotal: 0,
+      };
       groups.set(r.doctorId, g);
     }
     g.lines.push(r);
     g.subtotal += r.amount;
   }
+  function renderLine(line: LedgerRow) {
+    return (
+      <div
+        key={line.paymentId}
+        className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 border-b py-2 last:border-b-0"
+      >
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="font-medium">{line.patientName}</span>
+          <span className="text-muted-foreground">·</span>
+          <span>{line.treatment}</span>
+          <Badge variant={kindVariant(line.kind)}>
+            {paymentKindLabel(line.kind, line.amount)}
+          </Badge>
+          {line.implantCardNo != null ? (
+            <span className="text-sm">
+              بطاقة #
+              <span className="font-medium tabular-nums">
+                {line.implantCardNo}
+              </span>
+            </span>
+          ) : null}
+          {/* الدفتر مجموعٌ بالطبيب، و«مجموع الطبيب» أسفله نقدُ اليوم
+              لا أساس حصته. الأشعة وحدها تختلف بين الرقمين، فتُعلَّم
+              هنا كي لا يُقرأ سطرها كعمل يُحتسب له. [D9] */}
+          {line.bucket === XRAY_BUCKET ? (
+            <span className="text-sm font-medium">دخل العيادة</span>
+          ) : null}
+          {/* ملاحظة الدفعة تُقرأ من السطر نفسه — كانت محفوظة ولا تُعرض
+              في أي شاشة. النص الكامل يظهر عند المرور. */}
+          {line.note?.trim() ? (
+            <span
+              title={line.note}
+              className="inline-flex min-w-0 max-w-64 items-center gap-1.5 text-sm"
+            >
+              <StickyNote className="text-muted-foreground size-4 shrink-0" />
+              <span className="truncate">{line.note}</span>
+            </span>
+          ) : null}
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <span
+            className={cn(
+              "money font-semibold tabular-nums",
+              line.amount < 0 && "text-destructive",
+            )}
+          >
+            {formatIQD(line.amount)}
+          </span>
+          <EditPaymentDialog
+            paymentId={line.paymentId}
+            amount={line.amount}
+            kind={line.kind}
+            paidDate={date}
+            note={line.note}
+            today={today}
+            patientName={line.patientName}
+            doctorChoice={
+              line.bucket === ORTHO_BUCKET
+                ? {
+                    doctorId: line.doctorId,
+                    doctors: orthoDoctors.some((d) => d.id === line.doctorId)
+                      ? orthoDoctors
+                      : [{ id: line.doctorId, name: line.doctorName }, ...orthoDoctors],
+                  }
+                : undefined
+            }
+          />
+          <VoidPaymentButton
+            paymentId={line.paymentId}
+            amount={line.amount}
+            paidDate={date}
+            patientName={line.patientName}
+          />
+        </div>
+      </div>
+    );
+  }
+
   const grandTotal = rows.reduce((s, r) => s + r.amount, 0) + filmsTotal;
   const prevDate = shiftISO(date, -1);
   const nextDate = shiftISO(date, 1);
@@ -147,71 +263,24 @@ export default async function DailyPage({
                 <CardTitle>{g.doctorName}</CardTitle>
               </CardHeader>
               <CardContent className="flex flex-col">
-                {g.lines.map((line) => (
-                  <div
-                    key={line.paymentId}
-                    className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 border-b py-2 last:border-b-0"
-                  >
-                    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                      <span className="font-medium">{line.patientName}</span>
-                      <span className="text-muted-foreground">·</span>
-                      <span>{line.treatment}</span>
-                      <Badge variant={kindVariant(line.kind)}>
-                        {paymentKindLabel(line.kind, line.amount)}
-                      </Badge>
-                      {line.implantCardNo != null ? (
-                        <span className="text-sm">
-                          بطاقة #
-                          <span className="font-medium tabular-nums">
-                            {line.implantCardNo}
-                          </span>
-                        </span>
-                      ) : null}
-                      {/* الدفتر مجموعٌ بالطبيب، و«مجموع الطبيب» أسفله نقدُ اليوم
-                          لا أساس حصته. الأشعة وحدها تختلف بين الرقمين، فتُعلَّم
-                          هنا كي لا يُقرأ سطرها كعمل يُحتسب له. [D9] */}
-                      {line.bucket === XRAY_BUCKET ? (
-                        <span className="text-sm font-medium">دخل العيادة</span>
-                      ) : null}
-                      {/* ملاحظة الدفعة تُقرأ من السطر نفسه — كانت محفوظة ولا تُعرض
-                          في أي شاشة. النص الكامل يظهر عند المرور. */}
-                      {line.note?.trim() ? (
-                        <span
-                          title={line.note}
-                          className="inline-flex min-w-0 max-w-64 items-center gap-1.5 text-sm"
-                        >
-                          <StickyNote className="text-muted-foreground size-4 shrink-0" />
-                          <span className="truncate">{line.note}</span>
-                        </span>
-                      ) : null}
-                    </div>
-                    <div className="flex shrink-0 items-center gap-1">
-                      <span
-                        className={cn(
-                          "money font-semibold tabular-nums",
-                          line.amount < 0 && "text-destructive",
-                        )}
-                      >
-                        {formatIQD(line.amount)}
-                      </span>
-                      <EditPaymentDialog
-                        paymentId={line.paymentId}
-                        amount={line.amount}
-                        kind={line.kind}
-                        paidDate={date}
-                        note={line.note}
-                        today={today}
-                        patientName={line.patientName}
-                      />
-                      <VoidPaymentButton
-                        paymentId={line.paymentId}
-                        amount={line.amount}
-                        paidDate={date}
-                        patientName={line.patientName}
-                      />
-                    </div>
-                  </div>
-                ))}
+                {g.isOwner
+                  ? OWNER_SECTIONS.map((sec) => {
+                      const mine = g.lines.filter((l) => ownerSection(l, date) === sec.key);
+                      if (mine.length === 0) return null;
+                      const sub = mine.reduce((sum, l) => sum + l.amount, 0);
+                      return (
+                        <div key={sec.key} className="flex flex-col pt-2 first:pt-0">
+                          <div className="bg-muted/40 flex items-center justify-between rounded-md px-2 py-1.5 text-sm">
+                            <span className="font-semibold">{sec.label}</span>
+                            <span className="money font-semibold tabular-nums">
+                              {formatIQD(sub)}
+                            </span>
+                          </div>
+                          {mine.map(renderLine)}
+                        </div>
+                      );
+                    })
+                  : g.lines.map(renderLine)}
 
                 <Separator className="my-2" />
                 <div className="flex items-center justify-between">

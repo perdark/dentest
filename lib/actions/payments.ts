@@ -50,11 +50,14 @@ const editSchema = z.object({
   amount: z.string().trim().min(1, "أدخل المبلغ"),
   paidDate: z.string().trim(),
   note: z.string().trim().max(500).optional().default(""),
+  // Ortho only — the dialog sends it there and nowhere else; the mutation
+  // refuses it on any other course. [2026-11-04]
+  doctorId: z.coerce.number().int().positive().optional(),
 });
 
 /**
- * تصحيح مبلغ دفعة أو تاريخها أو ملاحظتها. النوع والطبيب لا يُعدَّلان هنا: الطبيب
- * يتبع الحالة، والنوع الخاطئ يُلغى ويُعاد إدخاله. القيود نفسها التي تحكم إضافة
+ * تصحيح مبلغ دفعة أو تاريخها أو ملاحظتها. النوع لا يُعدَّل: النوع الخاطئ يُلغى
+ * ويُعاد إدخاله. الطبيب يتبع الحالة، إلا في التقويم: لكل دفعة طبيبها. القيود نفسها التي تحكم إضافة
  * دفعة جديدة تُطبَّق في طبقة البيانات.
  */
 export async function updatePaymentAction(
@@ -76,6 +79,7 @@ export async function updatePaymentAction(
     amount,
     paidDate: d.paidDate,
     note: d.note || null,
+    doctorId: d.doctorId,
   });
   if (!result.ok) return { error: paymentEditFailureMessage(result.reason) };
 

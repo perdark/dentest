@@ -14,6 +14,7 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { parseAmount } from "@/lib/format";
 import { EARLIEST_RECORD_DATE } from "@/lib/dates";
+import { OrthoDoctorField, type DoctorOption } from "@/components/forms/ortho-doctor-field";
 
 /**
  * المقدمة: مبلغ يُتفق عليه مرة، ثم يُسدَّد على دفعات.
@@ -28,9 +29,13 @@ export function OrthoDownPaymentSection({
   agreed,
   collected,
   canCollect,
+  doctors,
+  defaultDoctorId,
 }: {
   caseId: number;
   today: string;
+  doctors: DoctorOption[];
+  defaultDoctorId: number;
   /** المقدمة المتفق عليها كما هي محفوظة على الحالة. */
   agreed: number;
   /** ما قُبض منها فعلاً. */
@@ -49,6 +54,8 @@ export function OrthoDownPaymentSection({
           collected={collected}
           remaining={remaining}
           canCollect={canCollect}
+          doctors={doctors}
+          defaultDoctorId={defaultDoctorId}
         />
       ) : (
         <p className="text-muted-foreground text-sm">
@@ -122,12 +129,16 @@ function InstalmentForm({
   collected,
   remaining,
   canCollect,
+  doctors,
+  defaultDoctorId,
 }: {
   caseId: number;
   today: string;
   collected: number;
   remaining: number;
   canCollect: boolean;
+  doctors: DoctorOption[];
+  defaultDoctorId: number;
 }) {
   const formRef = useRef<HTMLFormElement>(null);
   const [amount, setAmount] = useState("");
@@ -196,6 +207,12 @@ function InstalmentForm({
             ]}
           />
         </Field>
+
+        <OrthoDoctorField
+          id={`ortho-down-doctor-${caseId}`}
+          doctors={doctors}
+          defaultDoctorId={defaultDoctorId}
+        />
 
         <Field>
           <FieldLabel htmlFor={`ortho-down-date-${caseId}`}>التاريخ</FieldLabel>

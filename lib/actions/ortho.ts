@@ -119,7 +119,7 @@ export async function createOrthoCase(
   redirect(`/ortho/${caseId}`);
 }
 
-// ── Add a session payment (credited to the case doctor) ─────────────────────
+// ── Add a session payment (credited to the doctor chosen on it) ─────────────
 export async function addOrthoPayment(
   _prev: OrthoFormState,
   formData: FormData,
@@ -130,6 +130,8 @@ export async function addOrthoPayment(
     amount: z.string().optional(),
     paidDate: z.string().optional(),
     note: z.string().optional(),
+    // من قام بالزيارة: د. عدي وحده أو طبيبة التقويم. [2026-11-04]
+    doctorId: z.coerce.number().int().positive().optional(),
   });
 
   const parsed = schema.safeParse(Object.fromEntries(formData));
@@ -152,6 +154,7 @@ export async function addOrthoPayment(
     paidDate,
     note: d.note?.trim() || null,
     expectedCourse: "ortho",
+    doctorId: d.doctorId,
   });
   if (!result.ok) return { error: paymentFailureMessage(result.reason) };
 
@@ -177,6 +180,8 @@ export async function addOrthoDownPayment(
     amount: z.string().optional(),
     paidDate: z.string().optional(),
     note: z.string().optional(),
+    // من قام بالزيارة: د. عدي وحده أو طبيبة التقويم. [2026-11-04]
+    doctorId: z.coerce.number().int().positive().optional(),
   });
 
   const parsed = schema.safeParse(Object.fromEntries(formData));
@@ -196,6 +201,7 @@ export async function addOrthoDownPayment(
     paidDate,
     note: d.note?.trim() || null,
     expectedCourse: "ortho",
+    doctorId: d.doctorId,
   });
   if (!result.ok) return { error: paymentFailureMessage(result.reason) };
 

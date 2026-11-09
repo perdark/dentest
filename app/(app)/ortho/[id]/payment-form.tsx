@@ -10,15 +10,20 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { parseAmount } from "@/lib/format";
 import { EARLIEST_RECORD_DATE } from "@/lib/dates";
+import { OrthoDoctorField, type DoctorOption } from "@/components/forms/ortho-doctor-field";
 
 export function OrthoPaymentForm({
   caseId,
   today,
   paidSoFar,
   canCollect,
+  doctors,
+  defaultDoctorId,
 }: {
   caseId: number;
   today: string;
+  doctors: DoctorOption[];
+  defaultDoctorId: number;
   /** مجموع ما دفعته الحالة حتى الآن — للسطر الحيّ أسفل النموذج. */
   paidSoFar: number;
   canCollect: boolean;
@@ -76,6 +81,12 @@ export function OrthoPaymentForm({
             ]}
           />
         </Field>
+
+        <OrthoDoctorField
+          id={`ortho-doctor-${caseId}`}
+          doctors={doctors}
+          defaultDoctorId={defaultDoctorId}
+        />
 
         <Field>
           <FieldLabel htmlFor={`ortho-paid-date-${caseId}`}>التاريخ</FieldLabel>

@@ -457,6 +457,26 @@ export interface NewPaymentInput {
   paidDate: string;
   note?: string | null;
   expectedCourse?: TreatmentCourse;
+  /**
+   * Ortho only: the doctor who did this visit. Ortho is worked by the owner
+   * and the ortho doctor together — the owner alone took every old down
+   * payment and some sessions, the rest are hers at her %. Absent = the
+   * case's doctor. Refused on any other course. [قرار العيادة 2026-11-04]
+   */
+  doctorId?: number;
+}
+
+/**
+ * May `doctorId` be credited with a payment on an ortho case? Only a doctor
+ * who does ortho — the select offers no one else, and the server says so too.
+ * The doctor already on the payment stays allowed, so an edit that only fixes
+ * the amount never fails on a doctor switched off since.
+ */
+function orthoPaymentDoctorAllowed(doctorId: number, current?: number): boolean {
+  if (!Number.isSafeInteger(doctorId) || doctorId <= 0) return false;
+  if (doctorId === current) return true;
+  const d = db.select().from(doctors).where(eq(doctors.id, doctorId)).get();
+  return !!d && d.isActive && d.doesOrtho;
 }
 
 /** ما قُبض فعلاً من المقدمة على هذه الحالة (المقدمة وحدها، لا الجلسات). */
@@ -477,6 +497,7 @@ export type PaymentFailure =
   | "invalid_date"
   | "future_date"
   | "wrong_course"
+  | "invalid_doctor"
   | "exceeds_remaining"
   | "exceeds_down_payment"
   | "refund_exceeds_paid";
@@ -493,6 +514,7 @@ export function paymentFailureMessage(reason: PaymentFailure): string {
     invalid_date: "التاريخ غير صحيح.",
     future_date: "لا يمكن تسجيل دفعة بتاريخ لاحق لليوم — تحقّق من السنة.",
     wrong_course: "الحالة لا تنتمي إلى سجل العلاج المطلوب.",
+    invalid_doctor: "اختر طبيب تقويم صحيحاً.",
     exceeds_remaining: "المبلغ أكبر من الرصيد المتبقي.",
     exceeds_down_payment: "المبلغ أكبر من المتبقي من المقدمة المتفق عليها.",
     refund_exceeds_paid: "مبلغ الاسترجاع أكبر من صافي المبالغ المدفوعة.",
@@ -535,7 +557,8 @@ function insertPayment(
 
 /**
  * Record one collection/refund with all case invariants inside one transaction.
- * The credited doctor is always derived from the case, never from form input.
+ * The credited doctor is derived from the case — except on ortho, where each
+ * visit names its own doctor (`input.doctorId`, checked here). [2026-11-04]
  */
 export const recordCasePayment = sqlite.transaction(
   (input: NewPaymentInput): PaymentResult => {
@@ -564,6 +587,16 @@ export const recordCasePayment = sqlite.transaction(
       treatmentCourse(treatmentCase.treatmentTypeId) !== input.expectedCourse
     ) {
       return { ok: false, reason: "wrong_course" };
+    }
+    let creditedDoctorId = treatmentCase.doctorId;
+    if (input.doctorId !== undefined && input.doctorId !== treatmentCase.doctorId) {
+      if (
+        treatmentCourse(treatmentCase.treatmentTypeId) !== "ortho" ||
+        !orthoPaymentDoctorAllowed(input.doctorId)
+      ) {
+        return { ok: false, reason: "invalid_doctor" };
+      }
+      creditedDoctorId = input.doctorId;
     }
 
     const paid =
@@ -613,7 +646,7 @@ export const recordCasePayment = sqlite.transaction(
 
     const amount = kind === "refund" ? -input.amount : input.amount;
     const paymentId = insertPayment(
-      { ...input, doctorId: treatmentCase.doctorId, kind },
+      { ...input, doctorId: creditedDoctorId, kind },
       amount,
     );
     return {
@@ -1538,7 +1571,8 @@ export type PaymentEditFailure =
   | "exceeds_remaining"
   | "exceeds_down_payment"
   | "refund_exceeds_paid"
-  | "below_refunds";
+  | "below_refunds"
+  | "invalid_doctor";
 
 export function paymentEditFailureMessage(reason: PaymentEditFailure): string {
   const messages = {
@@ -1550,15 +1584,17 @@ export function paymentEditFailureMessage(reason: PaymentEditFailure): string {
     exceeds_down_payment: "المبلغ أكبر من المقدمة المتفق عليها.",
     refund_exceeds_paid: "مبلغ الاسترجاع أكبر من صافي المبالغ المدفوعة.",
     below_refunds: "المبلغ أقل مما استُرجع من هذه الحالة — عدّل الاسترجاع أولاً.",
+    invalid_doctor: "اختر طبيب تقويم صحيحاً.",
   } satisfies Record<PaymentEditFailure, string>;
   return messages[reason];
 }
 
 /**
  * Correct a payment's amount, date or note. `amount` is the magnitude as the
- * clerk types it; a refund keeps its negative sign. The credited doctor and the
- * kind are not editable here — the doctor follows the case (see
- * `updateCaseRecord`), and a wrong kind is voided and re-entered.
+ * clerk types it; a refund keeps its negative sign. The kind is not editable —
+ * a wrong kind is voided and re-entered. The credited doctor follows the case
+ * (see `updateCaseRecord`), except on ortho, where each payment carries its
+ * own doctor and `doctorId` corrects it. [2026-11-04]
  *
  * The same caps as `recordCasePayment` apply, measured against every OTHER
  * payment on the case, so an edit can never produce a balance a fresh entry
@@ -1567,7 +1603,7 @@ export function paymentEditFailureMessage(reason: PaymentEditFailure): string {
 export const updatePayment = sqlite.transaction(
   (
     id: number,
-    input: { amount: number; paidDate: string; note: string | null },
+    input: { amount: number; paidDate: string; note: string | null; doctorId?: number },
   ): { ok: true } | { ok: false; reason: PaymentEditFailure } => {
     if (!Number.isSafeInteger(input.amount) || input.amount < 0) {
       return { ok: false, reason: "invalid_amount" };
@@ -1583,6 +1619,15 @@ export const updatePayment = sqlite.transaction(
     }
     const treatmentCase = db.select().from(cases).where(eq(cases.id, before.caseId)).get();
     if (!treatmentCase) return { ok: false, reason: "not_found" };
+    const doctorChanged =
+      input.doctorId !== undefined && input.doctorId !== before.doctorId;
+    if (
+      doctorChanged &&
+      (treatmentCourse(treatmentCase.treatmentTypeId) !== "ortho" ||
+        !orthoPaymentDoctorAllowed(input.doctorId!, before.doctorId))
+    ) {
+      return { ok: false, reason: "invalid_doctor" };
+    }
 
     const others = paidOnCase(before.caseId, id);
     let amount: number;
@@ -1612,7 +1657,12 @@ export const updatePayment = sqlite.transaction(
       amount = input.amount;
     }
 
-    const after = { amount, paidDate: input.paidDate, note: input.note };
+    const after = {
+      amount,
+      paidDate: input.paidDate,
+      note: input.note,
+      ...(doctorChanged ? { doctorId: input.doctorId! } : {}),
+    };
     db.update(payments).set(after).where(eq(payments.id, id)).run();
     recordEditAcrossMonths(
       { entity: "payments", entityId: id, action: "update", before, after, note: "payment corrected" },
@@ -1623,7 +1673,7 @@ export const updatePayment = sqlite.transaction(
   },
 ) as unknown as (
   id: number,
-  input: { amount: number; paidDate: string; note: string | null },
+  input: { amount: number; paidDate: string; note: string | null; doctorId?: number },
 ) => { ok: true } | { ok: false; reason: PaymentEditFailure };
 
 export type CaseEditFailure =
@@ -1656,11 +1706,18 @@ function moveCasePayments(
   caseId: number,
   fromDoctorId: number,
   toDoctorId: number,
+  opts: { keepDownPayments?: boolean } = {},
 ): { count: number; total: number } {
   const moved = db
     .select()
     .from(payments)
-    .where(and(eq(payments.caseId, caseId), eq(payments.doctorId, fromDoctorId)))
+    .where(
+      and(
+        eq(payments.caseId, caseId),
+        eq(payments.doctorId, fromDoctorId),
+        opts.keepDownPayments ? sql`${payments.kind} <> 'down_payment'` : undefined,
+      ),
+    )
     .all();
   for (const p of moved) {
     db.update(payments).set({ doctorId: toDoctorId }).where(eq(payments.id, p.id)).run();
@@ -1698,6 +1755,9 @@ export function reassignDoctorFailureMessage(reason: ReassignDoctorFailure): str
  * nothing on screen could fix it. The case keeps everything else — card
  * number, down payment, sessions, dates. The money follows the doctor exactly
  * as `updateCaseRecord` moves it for an ordinary case. [D2][D4]
+ *
+ * Ortho is the exception: its down payments stay on whoever took them, and
+ * only the sessions move (see below). [2026-11-04]
  */
 export const reassignCaseDoctor = sqlite.transaction(
   (
@@ -1726,7 +1786,14 @@ export const reassignCaseDoctor = sqlite.transaction(
       period: monthOf(before.openedDate),
       note: "doctor corrected on the case",
     });
-    const moved = moveCasePayments(caseId, before.doctorId, doctorId);
+    // Ortho down payments stay where they are: the owner took the old ones
+    // alone, so moving a case to the ortho doctor must not hand her a share of
+    // them — 100 of them (35.3M since 2021) sat on 46 such cases. Sessions
+    // move; a session done by the owner alone is corrected on its own line.
+    // [قرار العيادة 2026-11-04]
+    const moved = moveCasePayments(caseId, before.doctorId, doctorId, {
+      keepDownPayments: treatmentCourse(before.treatmentTypeId) === "ortho",
+    });
 
     // The ortho «الموعد القادم» was booked under the case's doctor; it follows
     // the case so «المواعيد» shows the patient on the right doctor's day.

@@ -26,6 +26,9 @@ import { reassignCaseDoctorAction, type CaseEditState } from "@/lib/actions/case
  * The share of every payment on the case follows the case to the new doctor,
  * and the dialog says how much before it is saved — a doctor's monthly share
  * changes with this, so it must never look like a label edit.
+ *
+ * On ortho (`keepsDownPayments`) only the sessions move: the down payments
+ * stay on whoever took them. [2026-11-04]
  */
 export function ChangeDoctorDialog({
   caseId,
@@ -34,6 +37,7 @@ export function ChangeDoctorDialog({
   doctors,
   paidTotal,
   patientName,
+  keepsDownPayments = false,
 }: {
   caseId: number;
   currentDoctorId: number;
@@ -42,6 +46,7 @@ export function ChangeDoctorDialog({
   /** What has been collected on the case so far — moves with it. */
   paidTotal: number;
   patientName: string;
+  keepsDownPayments?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [formKey, setFormKey] = useState(0);
@@ -104,14 +109,21 @@ export function ChangeDoctorDialog({
             <p className="bg-muted/40 rounded-lg px-3 py-2.5 text-sm leading-relaxed">
               {paidTotal !== 0 ? (
                 <>
-                  المدفوع على هذه الحالة{" "}
+                  {keepsDownPayments ? "الجلسات المدفوعة" : "المدفوع على هذه الحالة"}{" "}
                   <span className="money font-semibold">{formatIQD(paidTotal)}</span> ينتقل
                   مع الحالة إلى {target?.name ?? "الطبيب الجديد"}، فتُحسب حصته منه في كل
                   شهر دُفع فيه. الأشهر المُقفلة التي تتغيّر تحتاج إعادة إقفال.
                 </>
               ) : (
-                <>لا مدفوع على الحالة بعد — الدفعات القادمة تُحسب للطبيب الجديد.</>
+                <>لا مدفوع ينتقل مع الحالة — الدفعات القادمة تُحسب للطبيب الجديد.</>
               )}
+              {keepsDownPayments ? (
+                <>
+                  {" "}
+                  دفعات المقدمة تبقى على من قبضها، وجلسة عملها طبيب وحده تُصحَّح من زر
+                  القلم بجانبها.
+                </>
+              ) : null}
             </p>
 
             <FormError>{state.error}</FormError>

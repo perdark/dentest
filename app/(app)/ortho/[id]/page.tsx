@@ -46,6 +46,17 @@ export default async function OrthoCasePage({
 
   const payments = paymentsForCase(caseId);
   const orthoDoctors = listDoctors({ activeOnly: true, does: "ortho" });
+  const doctorOptions = orthoDoctors.map((d) => ({ id: d.id, name: d.name }));
+  // A payment may sit on a doctor no longer offered (switched off since); its
+  // own doctor stays in its edit select so an amount fix never moves it.
+  const doctorOptionsFor = (p: { doctorId: number; doctorName: string }) =>
+    doctorOptions.some((d) => d.id === p.doctorId)
+      ? doctorOptions
+      : [{ id: p.doctorId, name: p.doctorName }, ...doctorOptions];
+  // «تغيير الطبيب» moves the sessions only — down payments stay. [2026-11-04]
+  const movingWithCase = payments
+    .filter((p) => p.kind !== "down_payment" && p.doctorId === raw.doctorId)
+    .reduce((sum, p) => sum + p.amount, 0);
   // المقدمة صارت مبلغاً متفقاً عليه يُسدَّد على دفعات: المقبوض هو مجموع قيود
   // «المقدمة» كلها، لا أوّل دفعة وحدها. [قرار العيادة 2026-08-25]
   const downPaymentAgreed = raw.downPaymentAgreed;
@@ -111,8 +122,9 @@ export default async function OrthoCasePage({
             caseId={caseId}
             currentDoctorId={raw.doctorId}
             currentDoctorName={detail.doctorName}
-            doctors={orthoDoctors.map((d) => ({ id: d.id, name: d.name }))}
-            paidTotal={detail.paid}
+            doctors={doctorOptions}
+            paidTotal={movingWithCase}
+            keepsDownPayments
             patientName={detail.patientName}
           />
           <OrthoStatusButton
@@ -169,6 +181,8 @@ export default async function OrthoCasePage({
               today={today}
               paidSoFar={detail.paid}
               canCollect={detail.status === "open"}
+              doctors={doctorOptions}
+              defaultDoctorId={raw.doctorId}
             />
           </CardContent>
         </Card>
@@ -186,6 +200,8 @@ export default async function OrthoCasePage({
             agreed={downPaymentAgreed}
             collected={downPaymentCollected}
             canCollect={detail.status === "open"}
+            doctors={doctorOptions}
+            defaultDoctorId={raw.doctorId}
           />
         </CardContent>
       </Card>
@@ -249,6 +265,7 @@ export default async function OrthoCasePage({
                           note={p.note}
                           today={today}
                           patientName={detail.patientName}
+                          doctorChoice={{ doctorId: p.doctorId, doctors: doctorOptionsFor(p) }}
                         />
                         <VoidPaymentButton
                           paymentId={p.id}

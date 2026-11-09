@@ -129,7 +129,7 @@ test("«حشوه» reuses the existing «حشوة» instead of adding a twin", (
   });
 });
 
-test("an ortho case moves to its real doctor with its payments; the closed month goes stale", () => {
+test("an ortho case moves to its real doctor with its sessions; down payments stay with the owner", () => {
   const { caseId } = mutations.createCaseWithPayment({
     patientId,
     doctorId: owner,
@@ -155,15 +155,43 @@ test("an ortho case moves to its real doctor with its payments; the closed month
   assert.equal(ortho("2026-09", owner).collectedOrtho, 500_000);
   assert.equal(ortho("2026-09", orthoDoctor).payout, 0);
 
+  // Only the session moves: the old down payment was the owner's alone, so
+  // the ortho doctor must not get 30% of it. [قرار العيادة 2026-11-04]
   const moved = mutations.reassignCaseDoctor(caseId, orthoDoctor);
-  assert.deepEqual(moved, { ok: true, moved: { count: 2, total: 600_000 } });
+  assert.deepEqual(moved, { ok: true, moved: { count: 1, total: 100_000 } });
 
   const sep = settlement.computeSettlement("2026-09");
-  assert.equal(sep.anyStale, true);
-  const sepDoctor = sep.doctors.find((d) => d.doctorId === orthoDoctor)!;
-  assert.equal(sepDoctor.collectedOrtho, 500_000);
-  assert.equal(sepDoctor.payout, 150_000); // 30%
+  assert.equal(sep.doctors.find((d) => d.doctorId === owner)!.collectedOrtho, 500_000);
+  assert.equal(sep.doctors.find((d) => d.doctorId === orthoDoctor)!.payout, 0);
   assert.equal(ortho("2026-10", orthoDoctor).payout, 30_000);
+  assert.equal(ortho("2026-10", owner).collectedOrtho, 0);
+
+  // A new visit defaults to the case's (new) doctor; one the owner did
+  // alone names him, and that is his — no share for her.
+  const hers = mutations.recordCasePayment({ caseId, amount: 200_000, kind: "session", paidDate: "2026-10-10" });
+  const his = mutations.recordCasePayment({
+    caseId,
+    amount: 50_000,
+    kind: "session",
+    paidDate: "2026-10-11",
+    doctorId: owner,
+  });
+  assert.equal(hers.ok && his.ok, true);
+  assert.equal(ortho("2026-10", orthoDoctor).payout, 90_000); // 30% of 300,000
+  assert.equal(ortho("2026-10", owner).collectedOrtho, 50_000);
+
+  // The pen corrects a line's doctor; the month it sits in is re-read.
+  if (!his.ok) throw new Error("unreachable");
+  assert.deepEqual(
+    mutations.updatePayment(his.paymentId, {
+      amount: 50_000,
+      paidDate: "2026-10-11",
+      note: null,
+      doctorId: orthoDoctor,
+    }),
+    { ok: true },
+  );
+  assert.equal(ortho("2026-10", orthoDoctor).payout, 105_000);
   assert.equal(ortho("2026-10", owner).collectedOrtho, 0);
 
   const c = dbClient.db.select().from(schema.cases).where(eq(schema.cases.id, caseId)).get()!;
@@ -180,6 +208,50 @@ test("an ortho case moves to its real doctor with its payments; the closed month
   });
 });
 
+test("a payment's own doctor is refused outside ortho and for a doctor who does no ortho", () => {
+  const normalDoctor = Number(
+    dbClient.db
+      .insert(schema.doctors)
+      .values({ name: "د. عام", sortOrder: 2, commissionPct: 50 })
+      .run().lastInsertRowid,
+  );
+  const filling = mutations.findOrCreateTreatmentType("حشوة");
+  if (!filling.ok) throw new Error("no filling type");
+  const { caseId: normalCase } = mutations.createCaseWithPayment({
+    patientId,
+    doctorId: normalDoctor,
+    treatmentTypeId: filling.id,
+    openedDate: "2026-10-01",
+    listPrice: 100_000,
+    discount: 0,
+    totalPrice: 100_000,
+  });
+  // Ordinary money always follows the case.
+  assert.deepEqual(
+    mutations.recordCasePayment({ caseId: normalCase, amount: 10_000, paidDate: "2026-10-02", doctorId: owner }),
+    { ok: false, reason: "invalid_doctor" },
+  );
+  const { caseId: orthoCase } = mutations.createCaseWithPayment({
+    patientId,
+    doctorId: orthoDoctor,
+    treatmentTypeId: orthoType,
+    openedDate: "2026-10-01",
+    listPrice: 0,
+    discount: 0,
+    totalPrice: 0,
+  });
+  assert.deepEqual(
+    mutations.recordCasePayment({ caseId: orthoCase, amount: 10_000, kind: "session", paidDate: "2026-10-02", doctorId: normalDoctor }),
+    { ok: false, reason: "invalid_doctor" },
+  );
+  const ok = mutations.recordCasePayment({ caseId: normalCase, amount: 10_000, paidDate: "2026-10-02" });
+  if (!ok.ok) throw new Error("payment refused");
+  assert.deepEqual(
+    mutations.updatePayment(ok.paymentId, { amount: 10_000, paidDate: "2026-10-02", note: null, doctorId: owner }),
+    { ok: false, reason: "invalid_doctor" },
+  );
+});
+
 test("patient search ignores أ/ا and ة/ه, so the existing file is found", () => {
   // Typed without the hamza; the file was saved as «سبأ فائق».
   const found = queries.patientsList({ q: "سبا فائق" });
@@ -187,10 +259,11 @@ test("patient search ignores أ/ا and ة/ه, so the existing file is found", ()
 });
 
 test("cash on hand counts only from the start date when one is set", () => {
-  // Records so far: 500,000 (2026-09-05) + 100,000 (2026-10-03).
-  assert.equal(serverUtils.cashOnHand(), 600_000);
+  // Records so far: 500,000 (2026-09-05), then 360,000 in October
+  // (100,000 + 200,000 + 50,000 ortho sessions, 10,000 on a filling).
+  assert.equal(serverUtils.cashOnHand(), 860_000);
   mutations.updateSettings({ cashStartDate: "2026-10-01", openingCashBalance: 2_000_000 });
-  assert.equal(serverUtils.cashOnHand(), 2_100_000);
+  assert.equal(serverUtils.cashOnHand(), 2_360_000);
   mutations.updateSettings({ cashStartDate: null, openingCashBalance: 0 });
-  assert.equal(serverUtils.cashOnHand(), 600_000);
+  assert.equal(serverUtils.cashOnHand(), 860_000);
 });

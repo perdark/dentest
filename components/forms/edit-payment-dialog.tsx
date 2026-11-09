@@ -20,10 +20,14 @@ import { FormError } from "@/components/forms/form-error";
 import { EARLIEST_RECORD_DATE } from "@/lib/dates";
 import { PAYMENT_KIND_LABELS } from "@/lib/strings";
 import { updatePaymentAction, type VoidState } from "@/lib/actions/payments";
+import { OrthoDoctorField, type DoctorOption } from "@/components/forms/ortho-doctor-field";
 
 /**
  * تصحيح دفعة أُدخلت بمبلغ أو تاريخ خاطئ. نوع الدفعة يبقى كما هو — دفعة بنوع
  * خاطئ تُحذف وتُضاف من جديد. الاسترجاع يُكتب بمقداره، وإشارته تبقى سالبة.
+ *
+ * `doctorChoice` يُمرَّر لدفعات التقويم وحدها: لكل دفعة طبيبها هناك (د. عدي وحده
+ * أو مع طبيبة التقويم)، فيُصحَّح طبيب الدفعة من هنا. [2026-11-04]
  */
 export function EditPaymentDialog({
   paymentId,
@@ -33,6 +37,7 @@ export function EditPaymentDialog({
   note,
   today,
   patientName,
+  doctorChoice,
 }: {
   paymentId: number;
   amount: number;
@@ -41,6 +46,7 @@ export function EditPaymentDialog({
   note: string | null;
   today: string;
   patientName?: string;
+  doctorChoice?: { doctorId: number; doctors: DoctorOption[] };
 }) {
   const [open, setOpen] = useState(false);
   const [formKey, setFormKey] = useState(0);
@@ -105,6 +111,13 @@ export function EditPaymentDialog({
               />
             </div>
           </div>
+          {doctorChoice ? (
+            <OrthoDoctorField
+              id={`pe-doctor-${paymentId}`}
+              doctors={doctorChoice.doctors}
+              defaultDoctorId={doctorChoice.doctorId}
+            />
+          ) : null}
           <div className="space-y-1.5">
             <Label htmlFor={`pe-note-${paymentId}`}>ملاحظة (اختياري)</Label>
             <Input
