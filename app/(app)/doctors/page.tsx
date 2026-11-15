@@ -2,7 +2,8 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { ChevronLeft, ChevronRight, Stethoscope } from "lucide-react";
 import { computeSettlement } from "@/lib/settlement";
-import { labDuesForPeriod, listDoctors } from "@/lib/queries";
+import { OwnerNotebookRows } from "@/components/doctors/owner-notebook-rows";
+import { labDuesForPeriod, listDoctors, ownerNotebookTotals } from "@/lib/queries";
 import { currentPeriod, formatPeriodAr, shiftPeriod } from "@/lib/dates";
 import { formatIQD } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
@@ -135,22 +136,31 @@ export default async function DoctorsPage({
                   </div>
                 </div>
 
-                {/* السبب الوحيد لفتح هذه البطاقة: كم يُدفع لهذا الطبيب. الرقم
-                    يسبق كل ما عداه حجماً ووزناً، وأرقام المختبر تحته تابعة له. */}
-                <div className="border-primary/30 bg-primary/5 rounded-lg border px-3 py-2.5">
-                  <p className="text-muted-foreground text-sm">
-                    المستحق للطبيب — حصة هذا الشهر
-                  </p>
-                  <p className="money text-2xl font-bold">{formatIQD(d.payout)}</p>
-                  {d.assistantsTotal > 0 ? (
+                {/* المالك حصته 0% — رقم «المستحق» له صفر دائماً ولا يقول شيئاً.
+                    بطاقته تُقرأ كدفتره: ما دخل بكل نوع هذا الشهر. [2026-11-15] */}
+                {d.isOwner ? (
+                  <div className="border-primary/30 bg-primary/5 rounded-lg border px-3 py-2.5">
+                    <p className="text-muted-foreground mb-2 text-sm">دفتر الطبيب — هذا الشهر</p>
+                    <OwnerNotebookRows totals={ownerNotebookTotals(d.doctorId, period)} />
+                  </div>
+                ) : (
+                  // السبب الوحيد لفتح هذه البطاقة: كم يُدفع لهذا الطبيب. الرقم
+                  // يسبق كل ما عداه حجماً ووزناً، وأرقام المختبر تحته تابعة له.
+                  <div className="border-primary/30 bg-primary/5 rounded-lg border px-3 py-2.5">
                     <p className="text-muted-foreground text-sm">
-                      بعد أجور المساعدين{" "}
-                      <span className="money text-amber-700 dark:text-amber-500">
-                        {formatIQD(d.assistantsTotal)}
-                      </span>
+                      المستحق للطبيب — حصة هذا الشهر
                     </p>
-                  ) : null}
-                </div>
+                    <p className="money text-2xl font-bold">{formatIQD(d.payout)}</p>
+                    {d.assistantsTotal > 0 ? (
+                      <p className="text-muted-foreground text-sm">
+                        بعد أجور المساعدين{" "}
+                        <span className="money text-amber-700 dark:text-amber-500">
+                          {formatIQD(d.assistantsTotal)}
+                        </span>
+                      </p>
+                    ) : null}
+                  </div>
+                )}
 
                 <dl className="grid gap-1.5 text-sm">
                   <div className="flex items-center justify-between gap-2">
@@ -165,6 +175,8 @@ export default async function DoctorsPage({
                     </dt>
                     <dd className="money font-semibold">{formatIQD(lab.mobile)}</dd>
                   </div>
+                  {/* حصة المالك 0% فـ«الصافي بعد المختبر» له رقم بلا معنى. */}
+                  {d.isOwner ? null : (
                   <div className="mt-1 flex items-center justify-between gap-2 border-t pt-1.5">
                     <dt className="text-muted-foreground">
                       الصافي بعد المختبر
@@ -173,6 +185,7 @@ export default async function DoctorsPage({
                       {formatIQD(d.payout - lab.total)}
                     </dd>
                   </div>
+                  )}
                 </dl>
 
                 <p className="text-muted-foreground text-sm">

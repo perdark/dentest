@@ -3,7 +3,13 @@ import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { ChevronLeft, ChevronRight, Stethoscope } from "lucide-react";
 import { computeSettlement } from "@/lib/settlement";
-import { doctorById, labEntriesForDoctor, labDuesForPeriod } from "@/lib/queries";
+import {
+  doctorById,
+  labEntriesForDoctor,
+  labDuesForPeriod,
+  ownerNotebookTotals,
+} from "@/lib/queries";
+import { OwnerNotebookRows } from "@/components/doctors/owner-notebook-rows";
 import { currentPeriod, formatDateShort, formatPeriodAr, shiftPeriod, todayISO } from "@/lib/dates";
 import { formatIQD } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
@@ -190,18 +196,29 @@ export default async function DoctorPage({
           {/* «مستحقات العيادة» على صفحة طبيب تُقرأ كأنها مالٌ عليه للعيادة.
               العنوان يقول اتجاه المال صراحةً. */}
           <div>
-            <h2 className="text-lg font-semibold">المستحق للطبيب — حصة هذا الشهر</h2>
+            <h2 className="text-lg font-semibold">
+              {doctor.isOwner ? "دفتر الطبيب — هذا الشهر" : "المستحق للطبيب — حصة هذا الشهر"}
+            </h2>
             <p className="text-muted-foreground text-sm">
-              هذا ما تدفعه العيادة للطبيب عن الشهر المختار.
+              {doctor.isOwner
+                ? "ما دخل حسابه بكل نوع، مثل الدفتر."
+                : "هذا ما تدفعه العيادة للطبيب عن الشهر المختار."}
             </p>
           </div>
           {mine ? (
             <>
-              <Row label="مُحصَّل — عام" value={formatIQD(mine.collectedNormal)} />
-              <Row label="مُحصَّل — زراعة" value={formatIQD(mine.collectedImplant)} />
-              <Row label="مُحصَّل — تقويم" value={formatIQD(mine.collectedOrtho)} />
-              <Row label="مجموع المُحصَّل" value={formatIQD(mine.collectedTotal)} />
-              <Row label="النسبة" value={`${mine.commissionPct}%`} />
+              {/* المالك يُقرأ بأنواع دفتره، والبقية بدلاء التسوية. [2026-11-15] */}
+              {doctor.isOwner ? (
+                <OwnerNotebookRows totals={ownerNotebookTotals(doctorId, period)} />
+              ) : (
+                <>
+                  <Row label="مُحصَّل — عام" value={formatIQD(mine.collectedNormal)} />
+                  <Row label="مُحصَّل — زراعة" value={formatIQD(mine.collectedImplant)} />
+                  <Row label="مُحصَّل — تقويم" value={formatIQD(mine.collectedOrtho)} />
+                  <Row label="مجموع المُحصَّل" value={formatIQD(mine.collectedTotal)} />
+                </>
+              )}
+              {doctor.isOwner ? null : <Row label="النسبة" value={`${mine.commissionPct}%`} />}
               {/* نسبة الطبيب فارغة ⇒ الحصة محسوبة بالبديل القديم من الإعدادات.
                   يُقال ذلك صراحةً ويُدلّ على مكان ضبطها، بدل رقم يبدو مختاراً. [§18] */}
               {doctor.commissionPct == null && mine.status !== "closed" ? (
@@ -235,8 +252,14 @@ export default async function DoctorPage({
                 </>
               ) : null}
               {/* خلاصة البطاقة. */}
+              {/* المالك حصته 0% فرقم «الحصة» له صفر دائماً — بطاقته تنتهي
+                  بما دخل حسابه هذا الشهر. [2026-11-15] */}
               <div className="border-primary/30 bg-primary/5 mt-1 rounded-lg border px-3 py-2.5">
-                <Row label="الحصة المستحقة" value={formatIQD(mine.payout)} emphasis />
+                {doctor.isOwner ? (
+                  <Row label="حساب الطبيب هذا الشهر" value={formatIQD(mine.collectedTotal)} emphasis />
+                ) : (
+                  <Row label="الحصة المستحقة" value={formatIQD(mine.payout)} emphasis />
+                )}
               </div>
             </>
           ) : (

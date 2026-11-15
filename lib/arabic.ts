@@ -22,3 +22,24 @@ export function normalizeArabic(value: string): string {
     .trim()
     .toLowerCase();
 }
+
+/**
+ * A payment on an earlier account typed into the treatment field — «توصيل
+ * مبلغ», «توصيل دين», «قسط ماستر». Opened as a new case it counts the money as
+ * new work and leaves the original balance owing forever: 37 such cases were
+ * in the clinic's records by 2026-10-25. Unlike «تقويم» inside «تنظيف تقويمي»,
+ * these phrases never name a treatment, so matching inside the name is safe.
+ *
+ * Takes a FOLDED name (`normalizeArabic`). Also read by «الدفتر اليومي» to
+ * file such a line under «توصيل مبلغ» on the owner's card. [2026-11-15]
+ */
+export function isPaymentPhrase(folded: string): boolean {
+  return (
+    folded.includes("توصيل مبلغ") ||
+    folded.includes("توصيل دين") ||
+    folded.includes("تسديد") ||
+    folded.startsWith("قسط") ||
+    folded === "دفعه" ||
+    folded === "مبلغ"
+  );
+}

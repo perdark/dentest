@@ -20,6 +20,7 @@ import { getTooth, type Surface } from "@/lib/db/teeth";
 import { cashOnHand, getSettings } from "@/lib/server-utils";
 import { currentPeriod, shiftISOByDays, todayISO } from "@/lib/dates";
 import { ORTHO_BUCKET, XRAY_BUCKET } from "@/lib/strings";
+import { ownerKind, type OwnerKind } from "@/lib/owner-notebook";
 import { normalizeArabic } from "@/lib/arabic";
 
 /**
@@ -460,6 +461,76 @@ export function collectableCasesForPatient(patientId: number) {
     )
     .orderBy(sql`(${cases.totalPrice} - (${paidExpr})) desc`, desc(cases.openedDate))
     .all();
+}
+
+/**
+ * What «د. عدي» offers to pay into once a patient is picked, per button
+ * [2026-11-15]: «توصيل مبلغ» → ordinary cases with a balance (any doctor —
+ * the money is credited to whoever's debt it is); «مقدمة تقويم» → open ortho
+ * cases; «زراعة» → implant cards not cancelled. Each button also offers «جديد».
+ */
+export function ownerEntryTargets(patientId: number) {
+  const rows = caseBase()
+    .where(sql`${cases.patientId} = ${patientId} and ${cases.status} != 'cancelled'`)
+    .orderBy(desc(cases.openedDate), desc(cases.id))
+    .all();
+  return {
+    delivery: rows.filter(
+      (c) => c.bucket === "normal" && !c.isImplant && !c.isOrtho && c.remaining > 0,
+    ),
+    // With what is left of an agreed down payment: a down payment above it is
+    // refused (2026-08-25 rule), so the clerk must see the number first.
+    ortho: rows
+      .filter((c) => (c.isOrtho || c.bucket === ORTHO_BUCKET) && c.status === "open")
+      .map((c) => {
+        const agreed =
+          db.select({ v: cases.downPaymentAgreed }).from(cases).where(eq(cases.id, c.id)).get()?.v ?? 0;
+        const taken =
+          db
+            .select({ v: sql<number>`coalesce(sum(${payments.amount}), 0)` })
+            .from(payments)
+            .where(and(eq(payments.caseId, c.id), eq(payments.kind, "down_payment")))
+            .get()?.v ?? 0;
+        return { ...c, downPaymentLeft: agreed > 0 ? Math.max(0, agreed - taken) : null };
+      }),
+    implant: rows.filter((c) => c.isImplant || c.bucket === "implant"),
+  };
+}
+
+/**
+ * The owner's month in his notebook's kinds (`lib/owner-notebook.ts`). Read
+ * from the live payments, so for a month closed and then edited it follows the
+ * edit, as «تحصيل الشهر» does. [2026-11-15]
+ */
+export function ownerNotebookTotals(doctorId: number, period: string) {
+  const rows = db
+    .select({
+      amount: payments.amount,
+      kind: payments.kind,
+      paidDate: payments.paidDate,
+      caseOpenedDate: cases.openedDate,
+      treatment: treatmentTypes.nameAr,
+      bucket: treatmentTypes.settlementBucket,
+    })
+    .from(payments)
+    .innerJoin(cases, eq(payments.caseId, cases.id))
+    .innerJoin(treatmentTypes, eq(cases.treatmentTypeId, treatmentTypes.id))
+    .where(
+      and(eq(payments.doctorId, doctorId), sql`substr(${payments.paidDate}, 1, 7) = ${period}`),
+    )
+    .all();
+  const totals: Record<OwnerKind, number> = {
+    work: 0,
+    delivery: 0,
+    orthoDown: 0,
+    orthoSession: 0,
+    implant: 0,
+  };
+  for (const r of rows) {
+    const k = ownerKind(r);
+    if (k) totals[k] += r.amount;
+  }
+  return totals;
 }
 
 // `openCasesBrief` and `collectableCaseCount` lived here until 2026-09-22.

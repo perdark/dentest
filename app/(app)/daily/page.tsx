@@ -25,6 +25,9 @@ import { VoidPaymentButton } from "@/components/forms/void-payment-button";
 import { EditPaymentDialog } from "@/components/forms/edit-payment-dialog";
 import { EntryDialog } from "./entry-dialog";
 import { ReceiptDialog } from "./receipt-dialog";
+import { OwnerDialog } from "./owner-dialog";
+import { isPaymentPhrase, normalizeArabic } from "@/lib/arabic";
+import { isDeliveryTreatment, ownerKind } from "@/lib/owner-notebook";
 
 /** Shift a YYYY-MM-DD by N days using local time. */
 function shiftISO(iso: string, days: number): string {
@@ -37,23 +40,23 @@ function shiftISO(iso: string, days: number): string {
 type LedgerRow = ReturnType<typeof dailyLedger>[number];
 
 /**
- * The owner's card is split three ways — he does normal work, implant and
- * ortho visits, and takes payments on old accounts, and all of it landed in
- * one list the clinic could not read back. [قرار العيادة 2026-11-04]
- *  - «عمل عادي»: a treatment opened that same day.
- *  - «جلسات»: an implant or ortho visit.
- *  - «توصيل مبلغ»: money on an ordinary treatment opened on an earlier day.
- * Only the grouping is new: the lines and «مجموع الطبيب» are unchanged.
+ * The owner's card reads like his paper notebook — the «د. عدي» buttons'
+ * kinds, by the one rule in `lib/owner-notebook.ts`. Ortho down payments and
+ * sessions share one «تقويم» section here (each line keeps its own badge).
+ * Only the grouping: the lines and «مجموع الطبيب» are unchanged.
  */
 const OWNER_SECTIONS = [
   { key: "work", label: "عمل عادي" },
-  { key: "sessions", label: "جلسات" },
   { key: "delivery", label: "توصيل مبلغ" },
+  { key: "ortho", label: "تقويم" },
+  { key: "implant", label: "زراعة" },
 ] as const;
 
+const isDeliveryLine = (line: { treatment: string }) => isDeliveryTreatment(line.treatment);
+
 function ownerSection(line: LedgerRow, date: string): (typeof OWNER_SECTIONS)[number]["key"] {
-  if (line.bucket === "implant" || line.bucket === ORTHO_BUCKET) return "sessions";
-  return line.caseOpenedDate < date ? "delivery" : "work";
+  const k = ownerKind({ ...line, paidDate: date }) ?? "work";
+  return k === "orthoDown" || k === "orthoSession" ? "ortho" : k;
 }
 
 function kindVariant(kind: string): "destructive" | "secondary" | "outline" {
@@ -91,7 +94,13 @@ export default async function DailyPage({
   // The bucket filter lives in the query rather than here, so the rule is
   // stated once in SQL; the query also orders by the last time each treatment
   // was actually used, so what this clinic does every day sits at the top.
-  const treatments = normalTreatmentSuggestions();
+  // «توصيل مبلغ» is a row the clinic typed before the guard; offering it
+  // here would only lead to the refusal. It is entered from «د. عدي».
+  const treatments = normalTreatmentSuggestions().filter(
+    (t) => !isPaymentPhrase(normalizeArabic(t.nameAr)),
+  );
+  // The owner's notebook button — only when there is an active owner.
+  const owner = listDoctors({ activeOnly: true }).find((d) => d.isOwner);
 
   // Group ledger lines by doctor (rows already sorted by doctor sortOrder).
   const groups = new Map<
@@ -129,9 +138,11 @@ export default async function DailyPage({
           <span className="font-medium">{line.patientName}</span>
           <span className="text-muted-foreground">·</span>
           <span>{line.treatment}</span>
-          <Badge variant={kindVariant(line.kind)}>
-            {paymentKindLabel(line.kind, line.amount)}
-          </Badge>
+          {isDeliveryLine(line) ? null : (
+            <Badge variant={kindVariant(line.kind)}>
+              {paymentKindLabel(line.kind, line.amount)}
+            </Badge>
+          )}
           {line.implantCardNo != null ? (
             <span className="text-sm">
               بطاقة #
@@ -209,6 +220,14 @@ export default async function DailyPage({
           <p className="text-base font-medium">{formatDateAr(date)}</p>
         </div>
         <div data-tour="daily-add" className="flex flex-wrap gap-2">
+          {owner ? (
+            <OwnerDialog
+              ownerName={owner.name}
+              treatments={treatments}
+              date={date}
+              today={today}
+            />
+          ) : null}
           <ReceiptDialog date={date} today={today} />
           {/* «التالي» can walk the ledger into tomorrow, but a case cannot be
               opened there — the dialog clamps its own date to today. */}
@@ -269,7 +288,7 @@ export default async function DailyPage({
                       if (mine.length === 0) return null;
                       const sub = mine.reduce((sum, l) => sum + l.amount, 0);
                       return (
-                        <div key={sec.key} className="flex flex-col pt-2 first:pt-0">
+                        <div key={sec.key} data-owner-section={sec.key} className="flex flex-col pt-2 first:pt-0">
                           <div className="bg-muted/40 flex items-center justify-between rounded-md px-2 py-1.5 text-sm">
                             <span className="font-semibold">{sec.label}</span>
                             <span className="money font-semibold tabular-nums">

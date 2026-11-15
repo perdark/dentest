@@ -24,7 +24,7 @@ import { isValidToothCode, type Surface } from "@/lib/db/teeth";
 import { recordEdit, nextCounter } from "@/lib/server-utils";
 import { isValidISODate, isRecordableDate, monthOf, todayISO } from "@/lib/dates";
 import { ORTHO_BUCKET, XRAY_BUCKET } from "@/lib/strings";
-import { normalizeArabic } from "@/lib/arabic";
+import { isPaymentPhrase, normalizeArabic } from "@/lib/arabic";
 
 function atomicMutation<TArgs extends unknown[], TResult>(
   mutation: (...args: TArgs) => TResult,
@@ -153,7 +153,7 @@ export function treatmentTypeFailureMessage(reason: TreatmentTypeFailure): strin
     ortho_record: "تُفتح حالات التقويم من سجل التقويم لإكمال بيانات الحالة",
     xray_record: "تُسجَّل الأشعة من سجل الأشعة — دخلها للعيادة لا للطبيب",
     payment_record:
-      "هذا مبلغ على حساب سابق وليس علاجاً — أضِفه من «استلام مبلغ» على حالة المريض نفسها",
+      "هذا مبلغ على حساب سابق وليس علاجاً — سجّله من «د. عدي ← توصيل مبلغ» أو «استلام مبلغ»",
   } satisfies Record<TreatmentTypeFailure, string>;
   return messages[reason];
 }
@@ -176,24 +176,6 @@ const RESERVED_ALIASES: Record<string, "implant" | "ortho"> = {
   "تقويم اسنان": "ortho",
   "تقويم الاسنان": "ortho",
 };
-
-/**
- * A payment on an earlier account typed into the treatment field — «توصيل
- * مبلغ», «توصيل دين», «قسط ماستر». Opened as a new case it counts the money as
- * new work and leaves the original balance owing forever: 37 such cases were
- * in the clinic's records by 2026-10-25. Unlike «تقويم» inside «تنظيف تقويمي»,
- * these phrases never name a treatment, so matching inside the name is safe.
- */
-function isPaymentPhrase(folded: string): boolean {
-  return (
-    folded.includes("توصيل مبلغ") ||
-    folded.includes("توصيل دين") ||
-    folded.includes("تسديد") ||
-    folded.startsWith("قسط") ||
-    folded === "دفعه" ||
-    folded === "مبلغ"
-  );
-}
 
 /** «  حشوة   مؤقتة » → «حشوة مؤقتة» — one written form per treatment. */
 function normalizeTreatmentName(nameAr: string): string {
@@ -2224,3 +2206,282 @@ export const wipeAllRecords = atomicMutation((note: string): WipeCounts => {
   recordEdit({ entity: "settings", entityId: 1, action: "delete", before: removed, note });
   return removed;
 });
+
+// ── «د. عدي»: the owner's four notebook entries [قرار العيادة 2026-11-15] ────
+/**
+ * The owner's paper notebook had four kinds of line — عمل عادي · توصيل مبلغ ·
+ * مقدمة تقويم · زراعة — and the clinic enters them in front of the patient
+ * with a name and an amount. The program spread them over three screens, and
+ * one had no door at all: money on a debt that lives only in the old paper
+ * notebook. «توصيل مبلغ» is refused as a treatment name (it hid real balances),
+ * and «استلام مبلغ» needs a case in the program, so the secretary was stuck.
+ *
+ * This composes the existing writes — nothing here prices or credits money in
+ * a way those paths do not:
+ *  - work      → a new ordinary case on the owner (`createCaseWithPayment`).
+ *  - delivery  → onto a chosen ordinary case with a balance (`recordCasePayment`,
+ *                credited to that case's doctor), or, with no case, ONE line
+ *                «توصيل مبلغ» on the owner priced at exactly what was paid —
+ *                it settles nothing else and never shows as owing.
+ *  - ortho     → a down payment credited to the owner on the chosen open ortho
+ *                case, or on a new open-ended one. A new case's own doctor is
+ *                the clinic's other ortho doctor, so her sessions stay hers;
+ *                the down payment is the owner's (2.5.1 rule, OWNER-NOTES §21).
+ *  - implant   → a payment on the chosen implant card, or a new card priced at
+ *                what was paid (its full price is corrected on the card).
+ * One transaction: a refused payment leaves no half-made patient or case.
+ */
+export type OwnerEntryKind = "work" | "delivery" | "ortho" | "implant";
+
+export type OwnerEntryFailure =
+  | "no_owner"
+  | "invalid_amount"
+  | "future_date"
+  | "price_below_paid"
+  | "bad_target"
+  | "no_type"
+  | TreatmentTypeFailure
+  | PaymentFailure;
+
+export interface OwnerEntryInput {
+  kind: OwnerEntryKind;
+  patient: { id: number } | { fullName: string; phone?: string | null };
+  amount: number;
+  date: string;
+  /** work only */
+  treatmentName?: string;
+  /** work only: the agreed price when more than what is paid now. */
+  price?: number;
+  /** delivery / ortho / implant: the patient's case to pay into; absent = new. */
+  caseId?: number;
+  note?: string | null;
+}
+
+export type OwnerEntryResult =
+  | { ok: true; caseId: number; patientId: number }
+  | { ok: false; reason: OwnerEntryFailure };
+
+class OwnerEntryAbort extends Error {
+  constructor(readonly reason: OwnerEntryFailure) {
+    super(reason);
+  }
+}
+
+export const OWNER_DELIVERY_KEY = "old_debt";
+export const OWNER_DELIVERY_NAME = "توصيل مبلغ";
+
+/**
+ * The treatment type a paper-notebook delivery is filed under. The clinic
+ * already typed «توصيل مبلغ» by hand before the guard, so that row is reused
+ * rather than split into a twin; only a database without one gets a new row.
+ */
+function deliveryTreatmentTypeId(): number {
+  const all = db.select().from(treatmentTypes).all();
+  const byKey = all.find((t) => t.key === OWNER_DELIVERY_KEY);
+  if (byKey) return byKey.id;
+  const folded = normalizeArabic(OWNER_DELIVERY_NAME);
+  const byName = all
+    .filter((t) => t.settlementBucket === "normal" && normalizeArabic(t.nameAr) === folded)
+    .sort((a, b) => a.id - b.id)[0];
+  if (byName) return byName.id;
+  const res = db
+    .insert(treatmentTypes)
+    .values({
+      key: OWNER_DELIVERY_KEY,
+      nameAr: OWNER_DELIVERY_NAME,
+      nameEn: "Old notebook payment",
+      settlementBucket: "normal",
+      isImplant: false,
+      isOrtho: false,
+      isActive: true,
+      sortOrder: 100,
+    })
+    .run();
+  const id = Number(res.lastInsertRowid);
+  recordEdit({
+    entity: "treatment_types",
+    entityId: id,
+    action: "insert",
+    after: { key: OWNER_DELIVERY_KEY, nameAr: OWNER_DELIVERY_NAME },
+  });
+  return id;
+}
+
+function payOrAbort(input: NewPaymentInput): void {
+  const r = recordCasePayment(input);
+  if (!r.ok) throw new OwnerEntryAbort(r.reason);
+}
+
+const recordOwnerEntryTx = sqlite.transaction(
+  (input: OwnerEntryInput): { caseId: number; patientId: number } => {
+    const owner = db
+      .select()
+      .from(doctors)
+      .where(and(eq(doctors.isOwner, true), eq(doctors.isActive, true)))
+      .orderBy(doctors.sortOrder)
+      .get();
+    if (!owner) throw new OwnerEntryAbort("no_owner");
+
+    const amount = input.amount;
+    const minAmount = input.kind === "work" ? 0 : 1;
+    if (!Number.isSafeInteger(amount) || amount < minAmount) {
+      throw new OwnerEntryAbort("invalid_amount");
+    }
+    if (!isRecordableDate(input.date)) throw new OwnerEntryAbort("future_date");
+
+    // A chosen case must be this patient's and of the course the button names.
+    const course: TreatmentCourse | null =
+      input.kind === "ortho" ? "ortho" : input.kind === "implant" ? "implant" : input.kind === "delivery" ? "ordinary" : null;
+    let target: typeof cases.$inferSelect | undefined;
+    if (input.caseId !== undefined) {
+      if (input.kind === "work" || !("id" in input.patient)) {
+        throw new OwnerEntryAbort("bad_target");
+      }
+      target = db.select().from(cases).where(eq(cases.id, input.caseId)).get();
+      if (
+        !target ||
+        target.patientId !== input.patient.id ||
+        target.status === "cancelled" ||
+        treatmentCourse(target.treatmentTypeId) !== course
+      ) {
+        throw new OwnerEntryAbort("bad_target");
+      }
+    }
+
+    // Validated before the patient is written, so a refused form adds no one.
+    let workTypeId: number | null = null;
+    let price = amount;
+    if (input.kind === "work") {
+      price = input.price ?? amount;
+      if (!Number.isSafeInteger(price) || price < amount) {
+        throw new OwnerEntryAbort("price_below_paid");
+      }
+      const t = findOrCreateTreatmentType(input.treatmentName ?? "");
+      if (!t.ok) throw new OwnerEntryAbort(t.reason);
+      workTypeId = t.id;
+    }
+
+    const patientId =
+      "id" in input.patient
+        ? input.patient.id
+        : findOrCreatePatient({
+            fullName: input.patient.fullName,
+            phone: input.patient.phone || null,
+          });
+    if ("id" in input.patient && !db.select({ id: patients.id }).from(patients).where(eq(patients.id, patientId)).get()) {
+      throw new OwnerEntryAbort("bad_target");
+    }
+    const note = input.note?.trim() || null;
+
+    if (target) {
+      payOrAbort({
+        caseId: target.id,
+        amount,
+        kind: input.kind === "ortho" ? "down_payment" : "session",
+        paidDate: input.date,
+        note,
+        expectedCourse: course ?? undefined,
+        // Ortho names its visit's doctor; elsewhere the case's doctor is credited.
+        doctorId: input.kind === "ortho" ? owner.id : undefined,
+      });
+      return { caseId: target.id, patientId };
+    }
+
+    const typeOf = (pred: (t: typeof treatmentTypes.$inferSelect) => boolean) => {
+      const t = db.select().from(treatmentTypes).all().find(pred);
+      if (!t) throw new OwnerEntryAbort("no_type");
+      return t.id;
+    };
+
+    if (input.kind === "ortho") {
+      const orthoDoctor =
+        db
+          .select()
+          .from(doctors)
+          .where(
+            and(eq(doctors.isActive, true), eq(doctors.doesOrtho, true), eq(doctors.isOwner, false)),
+          )
+          .orderBy(doctors.sortOrder)
+          .get() ?? owner;
+      const caseId = createCase({
+        patientId,
+        doctorId: orthoDoctor.id,
+        treatmentTypeId: typeOf((t) => t.isOrtho || t.settlementBucket === ORTHO_BUCKET),
+        openedDate: input.date,
+        listPrice: 0,
+        discount: 0,
+        totalPrice: 0,
+        downPaymentAgreed: 0,
+      });
+      payOrAbort({
+        caseId,
+        amount,
+        kind: "down_payment",
+        paidDate: input.date,
+        note,
+        expectedCourse: "ortho",
+        doctorId: owner.id,
+      });
+      return { caseId, patientId };
+    }
+
+    const treatmentTypeId =
+      input.kind === "work"
+        ? workTypeId!
+        : input.kind === "delivery"
+          ? deliveryTreatmentTypeId()
+          : typeOf((t) => t.isImplant || t.settlementBucket === "implant");
+    const { caseId } = createCaseWithPayment({
+      patientId,
+      doctorId: owner.id,
+      treatmentTypeId,
+      openedDate: input.date,
+      listPrice: price,
+      discount: 0,
+      totalPrice: price,
+      firstPayment:
+        amount > 0
+          ? { amount, kind: input.kind === "delivery" ? "session" : "down_payment", note }
+          : undefined,
+    });
+    return { caseId, patientId };
+  },
+) as unknown as (input: OwnerEntryInput) => { caseId: number; patientId: number };
+
+export function recordOwnerEntry(input: OwnerEntryInput): OwnerEntryResult {
+  try {
+    return { ok: true, ...recordOwnerEntryTx(input) };
+  } catch (e) {
+    if (e instanceof OwnerEntryAbort) return { ok: false, reason: e.reason };
+    throw e;
+  }
+}
+
+export function ownerEntryFailureMessage(reason: OwnerEntryFailure): string {
+  switch (reason) {
+    case "no_owner":
+      return "لا يوجد طبيب مالك فعّال في «الأطباء».";
+    case "invalid_amount":
+      return "أدخل مبلغاً صحيحاً أكبر من صفر.";
+    case "future_date":
+      return "لا يمكن التسجيل بتاريخ لاحق لليوم — تحقّق من السنة.";
+    case "price_below_paid":
+      return "السعر أقل من المبلغ المدفوع.";
+    case "bad_target":
+      return "الحساب المختار لا يخص هذا المريض — اختره من جديد.";
+    case "no_type":
+      return "نوع العلاج غير مُهيّأ في النظام.";
+    case "exceeds_remaining":
+      return "المبلغ أكبر من المتبقي على هذا الحساب — عدّل سعره من شاشته أولاً.";
+    case "exceeds_down_payment":
+      return "المبلغ أكبر من المتبقي من المقدمة المتفق عليها — إذا هي جلسة، سجّلها من شاشة التقويم.";
+    case "empty_name":
+    case "implant_record":
+    case "ortho_record":
+    case "xray_record":
+    case "payment_record":
+      return treatmentTypeFailureMessage(reason);
+    default:
+      return paymentFailureMessage(reason);
+  }
+}
